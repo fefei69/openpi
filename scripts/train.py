@@ -1,6 +1,7 @@
 import dataclasses
 import functools
 import logging
+import os
 import platform
 from typing import Any
 
@@ -200,7 +201,10 @@ def main(config: _config.TrainConfig):
             f"Batch size {config.batch_size} must be divisible by the number of devices {jax.device_count()}."
         )
 
-    jax.config.update("jax_compilation_cache_dir", str(epath.Path("~/.cache/jax").expanduser()))
+    jax.config.update(
+        "jax_compilation_cache_dir",
+        str(epath.Path(os.environ.get("JAX_COMPILATION_CACHE_DIR", "~/.cache/jax")).expanduser()),
+    )
 
     rng = jax.random.key(config.seed)
     train_rng, init_rng = jax.random.split(rng)
@@ -239,6 +243,14 @@ def main(config: _config.TrainConfig):
 
     if resuming:
         train_state = _checkpoints.restore_state(checkpoint_manager, train_state, data_loader)
+        latest_step = checkpoint_manager.latest_step()
+        if (
+            config.export_params_interval is not None
+            and latest_step is not None
+            and (latest_step % config.export_params_interval == 0 or latest_step == config.num_train_steps - 1)
+        ):
+            # Recover an export interrupted after its full checkpoint completed.
+            _checkpoints.export_policy_checkpoint(checkpoint_manager, latest_step)
 
     ptrain_step = jax.jit(
         functools.partial(train_step, config),
@@ -263,6 +275,8 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
+            if not all(np.isfinite(value).all() for value in reduced_info.values()):
+                raise FloatingPointError(f"Nonfinite training metrics at step {step}: {reduced_info}")
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
@@ -271,6 +285,10 @@ def main(config: _config.TrainConfig):
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+            if config.export_params_interval is not None and (
+                step % config.export_params_interval == 0 or step == config.num_train_steps - 1
+            ):
+                _checkpoints.export_policy_checkpoint(checkpoint_manager, step)
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()

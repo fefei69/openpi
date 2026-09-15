@@ -148,6 +148,14 @@ def create_torch_dataset(
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
+    if data_config.frame_indices_path is not None:
+        indices = np.load(data_config.frame_indices_path, allow_pickle=False)
+        if indices.ndim != 1 or not np.issubdtype(indices.dtype, np.integer) or indices.size == 0:
+            raise ValueError("Frame selection must be a nonempty one-dimensional integer array")
+        if np.any(indices < 0) or np.any(indices >= len(dataset)) or np.any(indices[1:] <= indices[:-1]):
+            raise ValueError("Frame selection must be sorted, unique, and within the full dataset")
+        dataset = torch.utils.data.Subset(dataset, indices.tolist())
+
     return dataset
 
 

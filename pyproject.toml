@@ -45,6 +45,10 @@ dependencies = [
 Repository = "https://github.com/Physical-Intelligence/openpi"
 
 [dependency-groups]
+hanoi = [
+    # The collection files contain HDF5 2.0 Boolean attributes.
+    "h5py==3.16.0",
+]
 dev = [
     "pytest>=8.3.4",
     "ruff>=0.8.6",

@@ -3,8 +3,13 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures as futures
 import dataclasses
+import json
 import logging
+import os
+import pathlib
+import shutil
 from typing import Protocol
+import uuid
 
 from etils import epath
 import jax
@@ -105,6 +110,53 @@ def restore_state(
             },
         )
     return _merge_params(restored["train_state"], restored["params"])
+
+
+def export_policy_checkpoint(checkpoint_manager: ocp.CheckpointManager, step: int) -> pathlib.Path:
+    """Atomically retain inference parameters/assets independently of full-state pruning.
+
+    Local immutable checkpoint files are hard-linked, so retaining a snapshot does not
+    copy optimizer state or duplicate the current parameters. The caller must serialize
+    exports with saves; waiting here also completes any asynchronous checkpoint write.
+    """
+    checkpoint_manager.wait_until_finished()
+    if step not in checkpoint_manager.all_steps():
+        raise ValueError(f"Checkpoint {step} is not complete")
+    root = pathlib.Path(str(checkpoint_manager.directory))
+    source = root / str(step)
+    destination = root / "exports" / str(step)
+    # The training writer serializes exports. Remove only abandoned export staging
+    # directories, which otherwise keep hard links alive after a killed process.
+    for abandoned in destination.parent.glob(".*-*.partial"):
+        if abandoned.is_dir() and not abandoned.is_symlink():
+            shutil.rmtree(abandoned)
+    if destination.exists():
+        manifest = json.loads((destination / "export.json").read_text())
+        if manifest["step"] != step or not all(
+            (destination / name).is_file() and (destination / name).stat().st_size == size
+            for name, size in manifest["files"].items()
+        ):
+            raise ValueError(f"Incomplete or inconsistent inference export: {destination}")
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.parent / f".{step}-{uuid.uuid4().hex}.partial"
+    temporary.mkdir()
+    try:
+        for item in ("params", "assets"):
+            if not (source / item).is_dir():
+                raise ValueError(f"Checkpoint is missing {item}: {source}")
+            shutil.copytree(source / item, temporary / item, copy_function=os.link)
+        files = {
+            str(path.relative_to(temporary)): path.stat().st_size
+            for path in sorted(temporary.rglob("*"))
+            if path.is_file()
+        }
+        (temporary / "export.json").write_text(json.dumps({"step": step, "files": files}, indent=2) + "\n")
+        temporary.rename(destination)
+    except BaseException:
+        shutil.rmtree(temporary)
+        raise
+    return destination
 
 
 def load_norm_stats(assets_dir: epath.Path | str, asset_id: str) -> dict[str, _normalize.NormStats] | None:

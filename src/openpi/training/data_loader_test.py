@@ -1,10 +1,43 @@
 import dataclasses
 
 import jax
+import numpy as np
+import pytest
 
 from openpi.models import pi0_config
 from openpi.training import config as _config
 from openpi.training import data_loader as _data_loader
+
+
+def test_frame_selection_preserves_global_chunk_indices(monkeypatch, tmp_path):
+    class Metadata:
+        def __init__(self, repo_id):
+            self.fps = 30
+
+    class Native:
+        def __init__(self, repo_id, delta_timestamps):
+            self.horizon = len(delta_timestamps["actions"])
+
+        def __len__(self):
+            return 20
+
+        def __getitem__(self, index):
+            # Two ten-row episodes; queries must remain bounded by the original episode.
+            end = (index // 10 + 1) * 10 - 1
+            return {"actions": np.minimum(np.arange(index, index + self.horizon), end)}
+
+    monkeypatch.setattr(_data_loader.lerobot_dataset, "LeRobotDatasetMetadata", Metadata)
+    monkeypatch.setattr(_data_loader.lerobot_dataset, "LeRobotDataset", Native)
+    path = tmp_path / "indices.npy"
+    np.save(path, [3, 9, 17])
+    config = _config.DataConfig(repo_id="local/test", frame_indices_path=str(path))
+    selected = _data_loader.create_torch_dataset(config, 4, pi0_config.Pi0Config())
+    np.testing.assert_array_equal(selected[1]["actions"], [9, 9, 9, 9])
+    np.testing.assert_array_equal(selected[2]["actions"], [17, 18, 19, 19])
+    for invalid in ([3, 3], [4, 2], [-1], [20], [], [1.5]):
+        np.save(path, invalid)
+        with pytest.raises(ValueError, match="Frame selection"):
+            _data_loader.create_torch_dataset(config, 4, pi0_config.Pi0Config())
 
 
 def test_torch_data_loader():

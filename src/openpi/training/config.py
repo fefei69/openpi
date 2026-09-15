@@ -19,6 +19,7 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.hanoi_policy as hanoi_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
@@ -89,6 +90,9 @@ class DataConfig:
 
     # If true, will use the LeRobot dataset task to define the prompt.
     prompt_from_task: bool = False
+
+    # Optional global frame indices, applied after native episode-bounded action chunking.
+    frame_indices_path: str | None = None
 
     # Only used for RLDS data loader (ie currently only used for DROID).
     rlds_data_dir: str | None = None
@@ -463,6 +467,39 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotHanoiDataConfig(DataConfigFactory):
+    frame_indices_path: str = "data/hanoi/indices/multitask_train.npy"
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if model_config.model_type != ModelType.PI05:
+            raise ValueError("The Hanoi contract is qualified for pi0.5")
+        delta_mask = _transforms.make_bool_mask(3, -1)
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "observation/image": "image",
+                            "observation/state": "state",
+                            "actions": "actions",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[hanoi_policy.HanoiInputs(), _transforms.DeltaActions(delta_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_mask), hanoi_policy.HanoiOutputs()],
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+            prompt_from_task=True,
+            frame_indices_path=self.frame_indices_path,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
     name: tyro.conf.Suppress[str]
@@ -516,6 +553,8 @@ class TrainConfig:
     save_interval: int = 1000
     # If set, any existing checkpoints matching step % keep_period == 0 will not be deleted.
     keep_period: int | None = 5000
+    # Optionally retain inference-only snapshots at this interval and at the final save.
+    export_params_interval: int | None = None
 
     # If true, will overwrite the checkpoint directory if it already exists.
     overwrite: bool = False
@@ -554,10 +593,63 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
+        if self.export_params_interval is not None and (
+            self.export_params_interval <= 0 or self.export_params_interval % self.save_interval != 0
+        ):
+            raise ValueError("Export interval must be a positive multiple of the save interval")
 
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    # Single-arm Cartesian Hanoi; see examples/hanoi/README.md.
+    TrainConfig(
+        name="pi05_hanoi_aaaa_to_cccc",
+        keep_period=None,
+        export_params_interval=5000,
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=63, discrete_state_input=True),
+        data=LeRobotHanoiDataConfig(
+            repo_id=hanoi_policy.REPO_ID,
+            frame_indices_path="data/hanoi/indices/aaaa_to_cccc_train.npy",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_workers=4,
+        wandb_enabled=False,
+        policy_metadata=hanoi_policy.CONTRACT,
+    ),
+    TrainConfig(
+        name="pi05_hanoi_cccc_to_aaaa",
+        keep_period=None,
+        export_params_interval=5000,
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=63, discrete_state_input=True),
+        data=LeRobotHanoiDataConfig(
+            repo_id=hanoi_policy.REPO_ID,
+            frame_indices_path="data/hanoi/indices/cccc_to_aaaa_train.npy",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_workers=4,
+        wandb_enabled=False,
+        policy_metadata=hanoi_policy.CONTRACT,
+    ),
+    TrainConfig(
+        name="pi05_hanoi_multitask",
+        keep_period=None,
+        export_params_interval=5000,
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=63, discrete_state_input=True),
+        data=LeRobotHanoiDataConfig(repo_id=hanoi_policy.REPO_ID),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_workers=4,
+        wandb_enabled=False,
+        policy_metadata=hanoi_policy.CONTRACT,
+    ),
     #
     # Inference Aloha configs.
     #
