@@ -1,0 +1,9 @@
+# Python 3.12 for ROS Jazzy. Source /opt/ros/jazzy/setup.bash when running ROS.
+# Install openpi-client from packages/openpi-client at the repository root (see README.md).
+trossen-arm==1.9.3
+numpy==1.26.4
+opencv-python==4.11.0.86
+websockets==15.0.1
+tyro==0.9.22
+h5py==3.16.0
+PyYAML==6.0.2

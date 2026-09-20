@@ -1,0 +1,5 @@
+{
+  "xyz_min_m": [0.411, -0.06021, 0.05471],
+  "xyz_max_m": [0.50020, 0.09199, 0.19413],
+  "source": "aaaa_to_cccc_episode_000/episode.h5 action_abs XYZ extrema, rounded outward and expanded by 3 mm; minimum Z clipped to the recorded table_z (0.05471 m). This bounds the recorded task region, not obstacles or self-collisions."
+}

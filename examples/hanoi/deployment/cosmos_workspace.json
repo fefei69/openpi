@@ -1,0 +1,13 @@
+{
+  "xyz_min_m": [
+    0.404,
+    -0.0672,
+    0.05471
+  ],
+  "xyz_max_m": [
+    0.5061,
+    0.099,
+    0.2061
+  ],
+  "source": "waypoint_v4 label XYZ extrema over all 35,872 recorded destinations (x [0.4920, 0.4961], y [-0.0572, 0.0890], z [0.0571, 0.1911] m), expanded by 10 mm in y, 10 mm in +x, 15 mm above the hover height, and in -x down to 10 mm beyond the recording's start pose behind peg B (x 0.4139 m), which every episode passes through at hover height; minimum Z clipped to the recorded table height 0.05471 m. Bounds the task region the policy was trained in, not obstacles or self-collisions. Live predictions sit 2-4 mm outside the label range before snapping."
+}
