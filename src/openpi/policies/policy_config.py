@@ -13,6 +13,16 @@ from openpi.training import config as _config
 import openpi.transforms as transforms
 
 
+def _metadata(train_config: _config.TrainConfig, checkpoint_dir: pathlib.Path) -> dict[str, Any] | None:
+    """Static policy metadata, extended per checkpoint when the config names a metadata module."""
+    if train_config.policy_metadata_module is None:
+        return train_config.policy_metadata
+    import importlib
+
+    module = importlib.import_module(train_config.policy_metadata_module)
+    return module.serving_metadata(train_config, checkpoint_dir)
+
+
 def create_trained_policy(
     train_config: _config.TrainConfig,
     checkpoint_dir: pathlib.Path | str,
@@ -88,7 +98,8 @@ def create_trained_policy(
             *repack_transforms.outputs,
         ],
         sample_kwargs=sample_kwargs,
-        metadata=train_config.policy_metadata,
+        metadata=_metadata(train_config, checkpoint_dir),
+        output_context_keys=train_config.policy_output_context_keys,
         is_pytorch=is_pytorch,
         pytorch_device=pytorch_device if is_pytorch else None,
     )

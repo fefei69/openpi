@@ -59,7 +59,7 @@ sbatch --parsable --chdir="$PWD" gpu_job.sbatch /absolute/path/to/python your_sc
 The batch command returns before execution starts; the workload runs when Slurm grants the allocation.
 See the [sbatch reference](https://slurm.schedmd.com/sbatch.html).
 
-For this OpenPI environment, add `source examples/hanoi/env.sh` and `unset JAX_PLATFORMS` before `exec`, run from
+For this OpenPI environment, add `source examples/hanoi/scripts/env.sh` and `unset JAX_PLATFORMS` before `exec`, run from
 `/scratch/cw5167/workspace/openpi`, and pass its `.venv/bin/python`. The environment includes
 `NUMPY_MADVISE_HUGEPAGE=0`, our tested mitigation for very slow NumPy checkpoint-buffer allocation on Torch.
 Use your own run/checkpoint directory. The existing `hanoi_20260914` experiment is owned by its active manager;

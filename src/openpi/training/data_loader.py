@@ -62,6 +62,94 @@ class TransformedDataset(Dataset[T_co]):
         return len(self._dataset)
 
 
+class IndexedActionDataset(Dataset):
+    """Explicit observation/target mapping over an existing LeRobot image dataset.
+
+    Sparse actions have no fixed time interval. Their validated archive contains
+    the action chunks directly; LeRobot timestamp offsets are not used.
+    """
+
+    def __init__(self, dataset: Dataset, path: str, horizon: int, *, require_validated: bool = True):
+        self._dataset = dataset
+        with np.load(path, allow_pickle=False) as archive:
+            self.rows = {key: archive[key].copy() for key in archive.files}
+        if require_validated and not bool(self.rows["validated"].item()):
+            raise ValueError("Sparse dataset completion/alignment audit has not passed; training is disabled")
+        indices = self.rows["observation_indices"]
+        n = len(indices)
+        if n == 0 or indices.ndim != 1 or not np.issubdtype(indices.dtype, np.integer):
+            raise ValueError("Indexed observations must be a nonempty integer vector")
+        if np.any(indices < 0) or np.any(indices >= len(dataset)) or np.any(np.diff(indices) <= 0):
+            raise ValueError("Indexed observations must be sorted, unique, and within the source dataset")
+        actions, states = self.rows["actions"], self.rows["states"]
+        if actions.ndim != 3 or actions.shape[:2] != (n, horizon) or states.ndim != 2 or len(states) != n:
+            raise ValueError("Indexed state/action shapes do not match the observation count and horizon")
+        if not np.isfinite(actions).all() or not np.isfinite(states).all():
+            raise ValueError("Indexed states and actions must be finite")
+        columns = self.rows["state_columns"]
+        if columns.shape != (states.shape[1],) or not np.issubdtype(columns.dtype, np.integer):
+            raise ValueError("State column mapping does not match the indexed states")
+        targets, padding = self.rows["source_action_indices"], self.rows["actions_is_pad"]
+        bounds = self.rows["episode_bounds"]
+        if targets.shape != (n, horizon) or padding.shape != targets.shape or bounds.shape != (n, 2):
+            raise ValueError("Indexed target provenance/padding shapes are invalid")
+        if not np.issubdtype(targets.dtype, np.integer) or padding.dtype != np.bool_:
+            raise ValueError("Indexed target provenance must be integer and padding must be boolean")
+        if np.any(indices < bounds[:, 0]) or np.any(indices >= bounds[:, 1]):
+            raise ValueError("Indexed observation crosses its source episode boundary")
+        if np.any(bounds[:, 0] < 0) or np.any(bounds[:, 1] > len(dataset)) or np.any(bounds[:, 0] >= bounds[:, 1]):
+            raise ValueError("Indexed episode bounds must lie within the source dataset")
+        provenance_keys = {"source_episode_bounds", "source_observation_indices"}
+        if provenance_keys.intersection(self.rows) and not provenance_keys.issubset(self.rows):
+            raise ValueError("Compact observations require both raw episode and observation provenance")
+        source_bounds = self.rows.get("source_episode_bounds", bounds)
+        source_indices = self.rows.get("source_observation_indices", indices)
+        if (
+            source_bounds.shape != (n, 2)
+            or source_indices.shape != (n,)
+            or not np.issubdtype(source_bounds.dtype, np.integer)
+            or not np.issubdtype(source_indices.dtype, np.integer)
+            or np.any(source_bounds[:, 0] < 0)
+            or np.any(source_bounds[:, 0] >= source_bounds[:, 1])
+            or np.any(source_indices < source_bounds[:, 0])
+            or np.any(source_indices >= source_bounds[:, 1])
+            or np.any(np.diff(source_indices) <= 0)
+        ):
+            raise ValueError("Invalid raw provenance for compact observations")
+        if np.any(targets < source_bounds[:, :1]) or np.any(targets >= source_bounds[:, 1:]):
+            raise ValueError("Indexed target crosses its source episode boundary")
+        if np.any(targets[:, 0] < source_indices):
+            raise ValueError("Indexed first target precedes its observation")
+        if np.any(np.diff(targets, axis=1) < 0) or np.any(np.diff(padding.astype(int), axis=1) < 0):
+            raise ValueError("Indexed targets must be ordered with padding only at the end")
+        if np.any(padding[:, 0]) or self.rows["episode_indices"].shape != (n,):
+            raise ValueError("Every observation needs a real first target and episode identity")
+        for row in np.flatnonzero(padding.any(axis=1)):
+            last = int(np.flatnonzero(~padding[row])[-1])
+            if not np.array_equal(actions[row, last:], np.broadcast_to(actions[row, last], actions[row, last:].shape)):
+                raise ValueError("Padded targets must repeat the final real target")
+
+    def __len__(self):
+        return len(self.rows["observation_indices"])
+
+    def __getitem__(self, index):
+        item = dict(self._dataset[int(self.rows["observation_indices"][index])])
+        if int(item["episode_index"]) != int(self.rows["episode_indices"][index]):
+            raise ValueError("Sparse archive and source dataset episode identities differ")
+        state = np.asarray(item["state"])[self.rows["state_columns"]]
+        if not np.array_equal(state, self.rows["states"][index]):
+            raise ValueError("Sparse archive and source observation states differ")
+        if "source_observation_indices" in self.rows:
+            if int(np.asarray(item["source_row"]).item()) != int(self.rows["source_observation_indices"][index]):
+                raise ValueError("Compact image row and raw observation provenance differ")
+            if not np.array_equal(np.asarray(item["cartesian_position"]), self.rows["cartesian_positions"][index]):
+                raise ValueError("Compact Cartesian context differs from its indexed source")
+        item["state"] = state.copy()
+        item["actions"] = self.rows["actions"][index].copy()
+        item["actions_is_pad"] = self.rows["actions_is_pad"][index].copy()
+        return item
+
+
 class IterableTransformedDataset(IterableDataset[T_co]):
     def __init__(
         self,
@@ -94,6 +182,83 @@ class IterableTransformedDataset(IterableDataset[T_co]):
 
     def __len__(self) -> int:
         return len(self._dataset)
+
+
+class RawFrameChunkDataset(Dataset):
+    """Observations are rows of a raw HDF5 recording; labels come from a validated dense index archive.
+
+    Frames are never copied: each item reads one `pixels[row]` frame from the recording. The file handle is
+    opened lazily in the process that reads, so forked loader workers never share an HDF5 handle.
+    """
+
+    def __init__(self, archive_path: str, *, require_validated: bool = True):
+        import h5py  # noqa: F401  (imported here so the dependency is only needed for this branch)
+
+        with np.load(archive_path, allow_pickle=False) as archive:
+            self.rows = {key: archive[key] for key in archive.files}
+        rows = self.rows
+        if require_validated and not bool(rows["validated"]):
+            raise ValueError("Dense archive has not been validated")
+        self.horizon = int(rows["horizon"])
+        self.source_path = str(rows["source_path"])
+        self.prompt = str(rows["prompt"])
+        observations = rows["source_observation_indices"]
+        targets = rows["source_action_indices"]
+        padding = rows["actions_is_pad"]
+        actions = rows["actions"]
+        states = rows["states"]
+        bounds = rows["source_episode_bounds"]
+        n = len(observations)
+        if observations.ndim != 1 or n == 0 or np.any(observations[1:] <= observations[:-1]):
+            raise ValueError("Dense observations must be a nonempty strictly increasing row index array")
+        if actions.shape != (n, self.horizon, 4) or not np.isfinite(actions).all():
+            raise ValueError("Dense actions must be finite (n, horizon, 4) reference poses")
+        if states.ndim != 2 or states.shape[0] != n or not np.isfinite(states).all():
+            raise ValueError("Dense states must be a finite (n, dim) array")
+        if targets.shape != (n, self.horizon) or padding.shape != (n, self.horizon) or bounds.shape != (n, 2):
+            raise ValueError("Dense target rows, padding and episode bounds must match the observations")
+        if np.any(observations < bounds[:, 0]) or np.any(observations >= bounds[:, 1]):
+            raise ValueError("Every observation must lie inside its episode")
+        real = ~padding
+        if np.any(targets[real] <= np.broadcast_to(observations[:, None], targets.shape)[real]) or np.any(
+            targets >= bounds[:, 1:2]
+        ):
+            raise ValueError("Every real target row must follow its observation inside the same episode")
+        if np.any(np.diff(targets, axis=1) < 0):
+            raise ValueError("Target rows must be non-decreasing along the chunk")
+        lengths = (~padding).sum(axis=1)
+        if not np.array_equal(padding, np.arange(self.horizon)[None] >= lengths[:, None]):
+            raise ValueError("Padding may occur only as an episode-tail suffix")
+        if np.any(targets[padding] != bounds[:, 1:2].repeat(self.horizon, axis=1)[padding] - 1):
+            raise ValueError("Padded slots must repeat the episode's last row")
+        if not np.isin(actions[..., 3], (0, 1)).all():
+            raise ValueError("Dense jaw intent must be binary")
+        self._pid = None
+        self._handle = None
+
+    def __len__(self) -> int:
+        return len(self.rows["source_observation_indices"])
+
+    def _frames(self):
+        import h5py
+
+        if self._handle is None or self._pid != os.getpid():
+            self._handle = h5py.File(self.source_path, "r")
+            self._pid = os.getpid()
+        return self._handle["pixels"]
+
+    def __getitem__(self, index: SupportsIndex) -> dict:
+        i = int(index)
+        row = int(self.rows["source_observation_indices"][i])
+        return {
+            "image": np.asarray(self._frames()[row]),
+            "state": self.rows["states"][i].copy(),
+            "actions": self.rows["actions"][i].copy(),
+            "actions_is_pad": self.rows["actions_is_pad"][i].copy(),
+            "prompt": self.prompt,
+            "episode_index": int(self.rows["episode_indices"][i]),
+            "source_row": row,
+        }
 
 
 class FakeDataset(Dataset):
@@ -136,17 +301,26 @@ def create_torch_dataset(
         raise ValueError("Repo ID is not set. Cannot create dataset.")
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
+    if data_config.dense_archive_path is not None:
+        if data_config.action_chunks_path is not None or data_config.frame_indices_path is not None:
+            raise ValueError("Dense raw-frame archives replace LeRobot chunk selection entirely")
+        return RawFrameChunkDataset(data_config.dense_archive_path)
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
-        delta_timestamps={
-            key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
-        },
+        delta_timestamps=None
+        if data_config.action_chunks_path
+        else {key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys},
     )
 
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
+
+    if data_config.action_chunks_path is not None:
+        if data_config.frame_indices_path is not None:
+            raise ValueError("Use explicit sparse observations or dense frame selection, not both")
+        dataset = IndexedActionDataset(dataset, data_config.action_chunks_path, action_horizon)
 
     if data_config.frame_indices_path is not None:
         indices = np.load(data_config.frame_indices_path, allow_pickle=False)

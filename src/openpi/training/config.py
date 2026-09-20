@@ -19,7 +19,11 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.hanoi_dense_policy as hanoi_dense_policy
+import openpi.policies.hanoi_joint_policy as hanoi_joint_policy
 import openpi.policies.hanoi_policy as hanoi_policy
+import openpi.policies.hanoi_sparse_policy as hanoi_sparse_policy
+import openpi.policies.hanoi_waypoint_policy as hanoi_waypoint_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
@@ -93,6 +97,12 @@ class DataConfig:
 
     # Optional global frame indices, applied after native episode-bounded action chunking.
     frame_indices_path: str | None = None
+
+    # Validated explicit observation/target chunks over a LeRobot dataset, without time-based action queries.
+    action_chunks_path: str | None = None
+
+    # Validated dense index archive whose frames are read from the raw recording (no LeRobot dataset).
+    dense_archive_path: str | None = None
 
     # Only used for RLDS data loader (ie currently only used for DROID).
     rlds_data_dir: str | None = None
@@ -500,6 +510,106 @@ class LeRobotHanoiDataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotHanoiSparseDataConfig(DataConfigFactory):
+    action_chunks_path: str = "data/hanoi/sparse_v2/indices/multitask_train.npz"
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if model_config.model_type != ModelType.PI05 or model_config.action_horizon != hanoi_sparse_policy.HORIZON:
+            raise ValueError("Sparse Hanoi requires pi0.5 with eight targets")
+        delta_mask = _transforms.make_bool_mask(3, -1)
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "observation/image": "image",
+                            "observation/state": "state",
+                            "actions": "actions",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[hanoi_sparse_policy.HanoiSparseInputs(), _transforms.DeltaActions(delta_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_mask), hanoi_sparse_policy.HanoiSparseOutputs()],
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+            prompt_from_task=True,
+            action_chunks_path=self.action_chunks_path,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotHanoiDenseDataConfig(DataConfigFactory):
+    """Dense contract five: frames indexed from the raw recording, absolute reference-pose chunks."""
+
+    dense_archive_path: str = "data/hanoi/dense_v5_pi05/indices/aaaa_to_cccc_train.npz"
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        horizons = {variant["horizon"] for variant in hanoi_dense_policy.VARIANTS.values()}
+        if model_config.model_type != ModelType.PI05 or model_config.action_horizon not in horizons:
+            raise ValueError(f"Dense Hanoi requires pi0.5 with a chunk length in {sorted(horizons)}")
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "observation/image": "image",
+                            "observation/state": "state",
+                            "actions": "actions",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[hanoi_dense_policy.HanoiDenseInputs(horizon=model_config.action_horizon)],
+                outputs=[hanoi_dense_policy.HanoiDenseOutputs(horizon=model_config.action_horizon)],
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+            dense_archive_path=self.dense_archive_path,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotHanoiJointDataConfig(DataConfigFactory):
+    action_chunks_path: str = "data/hanoi/joint_v3/indices/aaaa_to_cccc_train.npz"
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if model_config.model_type != ModelType.PI05 or model_config.action_horizon != hanoi_joint_policy.HORIZON:
+            raise ValueError("Joint Hanoi requires pi0.5 with eight sparse targets")
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(
+                inputs=[
+                    _transforms.RepackTransform(
+                        {
+                            "observation/image": "image",
+                            "observation/state": "state",
+                            "observation/cartesian_position": "cartesian_position",
+                            "actions": "actions",
+                            "prompt": "prompt",
+                        }
+                    )
+                ]
+            ),
+            data_transforms=_transforms.Group(
+                inputs=[hanoi_joint_policy.HanoiJointInputs(), hanoi_joint_policy.CartesianActions()],
+                outputs=[hanoi_joint_policy.CartesianActions(absolute=True), hanoi_sparse_policy.HanoiSparseOutputs()],
+            ),
+            model_transforms=ModelTransformFactory()(model_config),
+            prompt_from_task=True,
+            action_chunks_path=self.action_chunks_path,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class TrainConfig:
     # Name of the config. Must be unique. Will be used to reference this config.
     name: tyro.conf.Suppress[str]
@@ -563,9 +673,15 @@ class TrainConfig:
 
     # If true, will enable wandb logging.
     wandb_enabled: bool = True
+    # Image logging can be disabled while retaining training metrics and config.
+    wandb_log_images: bool = True
 
     # Used to pass metadata to the policy server.
     policy_metadata: dict[str, Any] | None = None
+    # Auxiliary observation fields needed by output transforms, outside model state.
+    policy_output_context_keys: tuple[str, ...] = ()
+    # Module exposing `serving_metadata(train_config, checkpoint_dir)`; extends `policy_metadata` per checkpoint.
+    policy_metadata_module: str | None = None
 
     # If the value is greater than 1, FSDP will be enabled and shard across number of specified devices; overall
     # device memory will be reduced but training could potentially be slower.
@@ -601,6 +717,133 @@ class TrainConfig:
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    TrainConfig(
+        name=hanoi_dense_policy.CONFIG_NAME,
+        assets_base_dir="data/hanoi/dense_v5_pi05/assets",
+        # Standard pi0.5 state input: the seven measured values are discretized into prompt tokens, as in the
+        # pi05_base pretraining and the v4 run. (`discrete_state_input=False` would drop the state entirely.)
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=hanoi_dense_policy.HORIZON, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id=hanoi_dense_policy.REPO_ID,
+            assets=AssetsConfig(asset_id=hanoi_dense_policy.ASSET_ID),
+            dense_archive_path="data/hanoi/dense_v5_pi05/indices/aaaa_to_cccc_train.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=30_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.CONTRACT,
+        policy_metadata_module="openpi.policies.hanoi_dense_policy",
+    ),
+    TrainConfig(
+        # Chunk-length comparison: 16 steps (1.6 s), the Cosmos horizon; otherwise identical to the v5 run.
+        name="pi05_hanoi_dense_h16_aaaa_to_cccc",
+        assets_base_dir="data/hanoi/dense_v5_pi05_h16/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id=hanoi_dense_policy.REPO_ID,
+            assets=AssetsConfig(asset_id=hanoi_dense_policy.ASSET_ID),
+            dense_archive_path="data/hanoi/dense_v5_pi05_h16/indices/aaaa_to_cccc_train.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=30_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=4_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_dense_h16_aaaa_to_cccc"),
+        policy_metadata_module="openpi.policies.hanoi_dense_policy",
+    ),
+    TrainConfig(
+        name=hanoi_waypoint_policy.CONFIG_NAME,
+        assets_base_dir="data/hanoi/waypoint_v4/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=8, discrete_state_input=True),
+        data=LeRobotHanoiJointDataConfig(
+            repo_id=hanoi_waypoint_policy.REPO_ID,
+            assets=AssetsConfig(asset_id=hanoi_waypoint_policy.ASSET_ID),
+            action_chunks_path="data/hanoi/waypoint_v4/indices/aaaa_to_cccc_train.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=4_001,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_waypoint_policy.CONTRACT,
+        policy_output_context_keys=("cartesian_position",),
+    ),
+    TrainConfig(
+        name=hanoi_joint_policy.CONFIG_NAME,
+        assets_base_dir="data/hanoi/joint_v3/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=8, discrete_state_input=True),
+        data=LeRobotHanoiJointDataConfig(
+            repo_id=hanoi_joint_policy.REPO_ID,
+            assets=AssetsConfig(asset_id=hanoi_joint_policy.ASSET_ID),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=30_000,
+            decay_lr=2.5e-6,
+        ),
+        num_train_steps=30_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_joint_policy.CONTRACT,
+        policy_output_context_keys=("cartesian_position",),
+    ),
+    # Sparse waypoint candidates use separate identities and cannot load unvalidated labels.
+    *[
+        TrainConfig(
+            name=f"pi05_hanoi_sparse_{task}",
+            assets_base_dir="data/hanoi/sparse_v2/assets",
+            model=pi0_config.Pi0Config(pi05=True, action_horizon=8, discrete_state_input=True),
+            data=LeRobotHanoiSparseDataConfig(
+                repo_id=hanoi_policy.REPO_ID,
+                assets=AssetsConfig(asset_id=hanoi_sparse_policy.ASSET_ID),
+                action_chunks_path=f"data/hanoi/sparse_v2/indices/{task}_train.npz",
+            ),
+            weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+            lr_schedule=_optimizer.CosineDecaySchedule(
+                warmup_steps=250, peak_lr=2.5e-5, decay_steps=5_000, decay_lr=2.5e-6
+            ),
+            num_train_steps=5_000,
+            save_interval=500,
+            keep_period=None,
+            export_params_interval=1_000,
+            num_workers=4,
+            wandb_enabled=True,
+            wandb_log_images=False,
+            policy_metadata=hanoi_sparse_policy.CONTRACT,
+        )
+        for task in ("aaaa_to_cccc", "cccc_to_aaaa", "multitask")
+    ],
     # Single-arm Cartesian Hanoi; see examples/hanoi/README.md.
     TrainConfig(
         name="pi05_hanoi_aaaa_to_cccc",

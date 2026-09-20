@@ -8,8 +8,8 @@ import numpy as np
 import optax
 import pytest
 
-from examples.hanoi import deliver
-from examples.hanoi import manage
+from examples.hanoi.pipeline import deliver
+from examples.hanoi.pipeline import manage
 from openpi.models import model as _model
 from openpi.shared import array_typing as at
 from openpi.shared import normalize

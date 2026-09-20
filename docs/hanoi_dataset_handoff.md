@@ -78,8 +78,8 @@ it is not a justification for deleting the deliberately noisy references.
 - Source hashes, episode mapping and split provenance: `data/hanoi/conversion.json`.
 - Completed validation evidence: `data/hanoi/data_validation.json` (`passed=true`, 720,100 numeric rows checked,
   2,300 image/chunk probes, training/serving input parity passed).
-- Audit/indexing/chunk helpers: `examples/hanoi/dataset.py`.
-- Conversion: `examples/hanoi/convert_hanoi_data_to_lerobot.py`.
+- Audit/indexing/chunk helpers: `examples/hanoi/data/dataset.py`.
+- Conversion: `examples/hanoi/data/convert_hanoi_data_to_lerobot.py`.
 - Shared camera/state/action contract: `src/openpi/policies/hanoi_policy.py`.
 - Full training/deployment plan: `docs/hanoi_training_plan.md`.
 

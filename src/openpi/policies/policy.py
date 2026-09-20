@@ -33,6 +33,7 @@ class Policy(BasePolicy):
         metadata: dict[str, Any] | None = None,
         pytorch_device: str = "cpu",
         is_pytorch: bool = False,
+        output_context_keys: Sequence[str] = (),
     ):
         """Initialize the Policy.
 
@@ -46,6 +47,8 @@ class Policy(BasePolicy):
             pytorch_device: Device to use for PyTorch models (e.g., "cpu", "cuda:0").
                           Only relevant when is_pytorch=True.
             is_pytorch: Whether the model is a PyTorch model. If False, assumes JAX model.
+            output_context_keys: Auxiliary transformed inputs to retain for output transforms.
+                These fields are not added to the model's observation/state.
         """
         self._model = model
         self._input_transform = _transforms.compose(transforms)
@@ -53,6 +56,7 @@ class Policy(BasePolicy):
         self._sample_kwargs = sample_kwargs or {}
         self._metadata = metadata or {}
         self._is_pytorch_model = is_pytorch
+        self._output_context_keys = tuple(output_context_keys)
         self._pytorch_device = pytorch_device
 
         if self._is_pytorch_model:
@@ -90,6 +94,7 @@ class Policy(BasePolicy):
         observation = _model.Observation.from_dict(inputs)
         start_time = time.monotonic()
         outputs = {
+            **{key: inputs[key] for key in self._output_context_keys},
             "state": inputs["state"],
             "actions": self._sample_actions(sample_rng_or_pytorch_device, observation, **sample_kwargs),
         }

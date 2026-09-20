@@ -7,7 +7,7 @@ the audit passed at 10:19 UTC. Reverse training is running as job `17839751` on 
 The manager, separate W&B logger, and finalizer were verified live on **cs673**. The current execution session is
 on cs653; inspect the controllers on their recorded host rather than interpreting missing local PIDs as exits.
 Current dated observations and process identities are recorded in
-[`data/hanoi/PROGRESS.md`](../data/hanoi/PROGRESS.md) and `data/hanoi/runs/hanoi_20260914/`.
+`data/hanoi/PROGRESS.md` on HPC and `data/hanoi/runs/hanoi_20260914/`.
 
 Conversion, shared transforms, three configs, normalization, teacher replay, GPU launchers, durable orchestration,
 inference exports, quota checks, and offline selection/evaluation are implemented. CPU preparation `17736379`
@@ -24,7 +24,7 @@ evaluation add time. The forward model's complete evaluation allocation ran for 
 establish the duration of reverse or multitask evaluation. The current reverse allocation ends at
 2026-09-15 22:29:20 UTC and is expected to need a continuation under the existing bounded policy.
 Keep the original, more conservative qualification measurements for the existing allocation/retry budgets.
-See [implementation progress and commands](../examples/hanoi/README.md).
+See [implementation progress and commands](../examples/hanoi/training/README.md).
 Updated 2026-09-15. Scheduling estimates below are dated observations, not reservations.
 
 ## Models and data contract
@@ -65,8 +65,9 @@ consistency; they do not establish success throughout every demonstration or on 
 ## Implementation and deployment equivalence
 
 Follow repository conventions: frozen transform/config dataclasses, `tyro` CLIs, existing logging and import style,
-Ruff rules, and focused colocated tests. Add Hanoi conversion/evaluation/launch utilities under `examples/hanoi/`,
-a Hanoi policy adapter, and three entries in the existing training registry. Add only an optional
+Ruff rules, and focused tests under `examples/hanoi/tests/`. Group Hanoi conversion, evaluation, deployment, and
+launch utilities by purpose under `examples/hanoi/`; keep the Hanoi policy adapter and three configurations in the
+existing policy and training registries. Add only an optional
 `DataConfig.frame_indices_path` to select validated global indices through `Subset(full_native_LeRobot_dataset)`.
 Resolve selection files during data loading, not policy construction, so serving needs no raw training dataset.
 
@@ -162,7 +163,7 @@ storage-budget check before production; never infer available user quota from th
 The conservative peak forecast is four full states plus eight inference exports, less already occupied pipeline
 storage, plus a 50 GiB reserve. Train/evaluate serially and measure actual checkpoint sizes during qualification.
 
-The manager in `examples/hanoi/manage.py` uses a durable run manifest and a lock scoped to this Hanoi pipeline.
+The manager in `examples/hanoi/pipeline/manage.py` uses a durable run manifest and a lock scoped to this Hanoi pipeline.
 It records per-stage Slurm states, ambiguous submission/requeue/replacement states, and model progress. Record config,
 code/lockfile/data-contract identity, exact sbatch arguments, hardware profile, experiment/checkpoint directory,
 job IDs, submission/eligible times, scheduler reasons, estimates, replacements, retries, and completed checkpoints.
@@ -200,11 +201,11 @@ sbatch --parsable \
   --chdir=/scratch/cw5167/workspace/openpi \
   --output=/scratch/cw5167/workspace/openpi/slurm/%x-%j.out \
   --error=/scratch/cw5167/workspace/openpi/slurm/%x-%j.err \
-  examples/hanoi/train.sbatch --config-name pi05_hanoi_aaaa_to_cccc --exp-name hanoi_20260914 \
+  examples/hanoi/scripts/train.sbatch --config-name pi05_hanoi_aaaa_to_cccc --exp-name hanoi_20260914 \
   --qualification-path data/hanoi/runs/hanoi_20260914/h100_1.json
 ```
 
-`examples/hanoi/train.sbatch` requires completed preparation and qualification artifacts. The manager will calculate
+`examples/hanoi/scripts/train.sbatch` requires completed preparation and qualification artifacts. The manager will calculate
 walltime and select the qualified profile rather than always using this example's values.
 
 ### Long-wait policy
@@ -274,7 +275,7 @@ walltime and select the qualified profile rather than always using this example'
   they are not blind-retry cases. Keep logs and report the cause.
 - Monitor GPU utilization/memory, measured steps per second, loss/gradient finiteness, checkpoint age, and remaining
   walltime. Keep preparation on CPU and fix pipeline bottlenecks rather than generating artificial GPU load.
-- Source `examples/hanoi/env.sh` before each stage; it sets `NUMPY_MADVISE_HUGEPAGE=0` before NumPy imports.
+- Source `examples/hanoi/scripts/env.sh` before each stage; it sets `NUMPY_MADVISE_HUGEPAGE=0` before NumPy imports.
   On September 14, production checkpoint 3250 stalled in JAX host transfer with heavy kernel compaction. A bounded
   CPU probe on the same node/allocation filled and checked a 2 GiB array in 1.04 seconds with huge-page advice off;
   the default advice exceeded 20 seconds. The pinned XLA transfer implementation allocates its buffer through
@@ -291,7 +292,7 @@ walltime and select the qualified profile rather than always using this example'
   launched with host permission is invisible inside the tool's isolated PID namespace; verify it on the host before
   deciding it has exited. A redundant queued controller (`17743243`) was canceled after that host check.
 - User-requested W&B tracking applies to the still-unsubmitted reverse and multitask models. Keep the independent
-  `examples.hanoi.wandb_logger` CPU process alive alongside the manager. Its stable per-model IDs and destination
+  `examples.hanoi.pipeline.wandb_logger` CPU process alive alongside the manager. Its stable per-model IDs and destination
   `cw5167-nyu/openpi` are recorded in `wandb_logging.json`; its heartbeat/PID/URLs are in `wandb_logger.json`.
   It publishes actual stdout metrics and telemetry, while native trainer logging flags and the qualified training
   identity stay unchanged. Use recorded optimizer steps as the plot axis and recover missing events from local
@@ -317,13 +318,13 @@ Before marking a selected model complete, compare its native `create_trained_pol
 path on eligible training observations, with identical explicit noise and ten sampling steps. Require finite
 63-by-4 absolute actions, numerical agreement, and identical binary jaw decisions. Test both prompts for multitask.
 
-`examples/hanoi/deliver.py` performs the final three-model audit. It restores only the saved optimizer-step scalar
+`examples/hanoi/pipeline/deliver.py` performs the final three-model audit. It restores only the saved optimizer-step scalar
 to confirm 30,000 completed updates, verifies the six validation results and selected test/serving evidence, recomputes
 selection, and hashes every selected checkpoint file. It emits an atomic delivery directory with source archive,
 normalization/checkpoint paths, metrics, copied manifests, checksum files, and portable download/serving commands.
 The source archive excludes recordings and checkpoints. A package-import check validates the archived runtime files.
 
-`examples/hanoi/finalize.py --watch` runs in the CPU allocation and invokes that audit once the manager has completed
+`examples/hanoi/pipeline/finalize.py --watch` runs in the CPU allocation and invokes that audit once the manager has completed
 all three models and reconciled every job. It holds a separate watcher lock and records a heartbeat in `finalizer.json`.
 It preserves an existing delivery and stops on audit failure. After successful packaging, its `ready_for_review` state
 still requires inspection of the generated evidence before declaring the goal complete. This watcher does not change
