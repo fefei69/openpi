@@ -495,6 +495,19 @@ above peg A, raw output): all 15 moves of the solution in 270 s, every move lega
 commands, every grasp within 1.1 mm of its ring level, grip strokes 15 / 20 / 25 / 31 mm for rings 1 to 4, tracking
 error 2.0 mm p95. The operator stopped the run 18 s after the last release and the arm returned home.
 
+Task progress and trials: [progress.py](progress.py) follows the ring stacks from the gripper events (standard start
+A = [4, 3, 2, 1]) and reports moves made and their legality, the optimal prefix (leading moves matching the 15-move
+solution), the fewest moves remaining from the final board (breadth-first search over the 81 boards) and
+`progress = (15 - remaining) / 15`, so a trial that stops early or wanders is scored by how far it got, not pass/fail.
+The dense client runs the tracker live: every grasp and release is logged (`grasp`, `move` events), the summary carries
+`moves_completed`, `optimal_prefix`, `remaining_moves`, `progress`, `solved` and `task_success`, and with
+`--stop-when-solved` (default) the run ends and homes as soon as the board reaches the goal. A missed grasp right
+after a close leaves the ring on its peg; a slip during a carry marks the board uncertain. `--tag <name>` labels a
+series of trials, and `run_trial_report.sh --tag <name>` writes `exp_vid/<name>/trials.md` and `trials.csv` in the
+family's checkout with one row per trial (moves, optimal prefix, remaining, progress, solve time, how it ended,
+brakes, tracking) and the aggregate; `run_publish_run.sh` also prints the progress line in each run's README and
+takes `--video-end-s` to cut the camera video.
+
 Camera recording: `--record-bag` on either client starts `ros2 bag record` of the full-frame camera stream and its
 camera_info into `<run>/camera_bag` (mcap, zstd_fast by default) for the whole run, robot initialization through the
 return home, and writes `bag_started`/`bag_stopped` events and a `camera_bag` summary entry with duration, size and

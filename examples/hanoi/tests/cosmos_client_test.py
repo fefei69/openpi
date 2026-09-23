@@ -195,9 +195,13 @@ def test_replay_episode_builds_contract_observations(tmp_path):
 
 
 def test_client_never_imports_the_model_environment():
+    import subprocess
     import sys
 
-    assert "torch" not in sys.modules and "cosmos_policy" not in sys.modules
+    # In a fresh interpreter, so other test modules that load the model stack cannot pollute the check.
+    code = ("import sys; import examples.hanoi.deployment.cosmos_client, examples.hanoi.deployment.dense_client; "
+            "assert 'torch' not in sys.modules and 'cosmos_policy' not in sys.modules and 'jax' not in sys.modules")
+    subprocess.run([sys.executable, "-c", code], check=True)
     assert cosmos_client.execution_adapter(cosmos_client.Config()).startswith("cosmos_waypoint_v4")
 
 

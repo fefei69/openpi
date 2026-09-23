@@ -287,6 +287,8 @@ def stop_actions(status: str, *, live: bool, return_home_after_duration: bool) -
         return True, True  # Nothing was dispatched; the arm rests at its last verified arrival.
     if status == "failed":
         return True, True  # An unexpected exception: open and home rather than hold a ring mid-carry.
+    if status == "task_solved":
+        return True, True
     return False, False
 
 
@@ -540,7 +542,7 @@ def main(config: Config):
             if config.record_bag:
                 topics = config.bag_topics or (config.camera_topic, config.camera_topic.rsplit("/", 1)[0] + "/camera_info")
                 bag = start_bag(output / "camera_bag", topics, storage_preset=config.bag_storage_preset)
-                log("bag_started", directory=str(bag.directory), topics=list(bag.topics), pid=bag.process.pid)
+                log("bag_started", directory=str(bag.directory), topics=list(bag.topics), pid=bag.process.pid, wall_s=time.time())
             camera = RosCamera(config.camera_topic)
             start_xyz, start_joints = START_POSES[config.start]
             arm = TrossenArm(config.robot_ip, initial_xyz=np.array(start_xyz))

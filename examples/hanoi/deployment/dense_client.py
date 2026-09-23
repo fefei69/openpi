@@ -54,6 +54,8 @@ from examples.hanoi.deployment.hardware import RosCamera
 from examples.hanoi.deployment.hardware import TrossenArm
 from examples.hanoi.deployment.hardware import check_grasp
 from examples.hanoi.deployment.hardware import validate_trajectory
+from examples.hanoi.deployment.progress import BoardTracker
+from examples.hanoi.deployment.progress import peg_of
 
 PROMPT = hanoi.PROMPTS["aaaa_to_cccc"]
 MAX_IMAGE_AGE_S = hanoi.CONTRACT["max_image_age_s"]
@@ -123,6 +125,10 @@ class Config:
     max_start_joint_error_rad: float = 0.05
     return_home_after_duration: bool = True
     finish_grace_s: float = 30.0
+    # Free-text label for a series of trials; recorded in config.json and summary.json for the trial report.
+    tag: str = ""
+    # Track the ring stacks from the gripper events and end the run once the board reaches the goal.
+    stop_when_solved: bool = True
     # Record a ROS 2 bag of the full-frame camera stream for the whole run, from robot initialization
     # to the return home, under <run>/camera_bag (mcap). The camera publishes 640 x 480 rgb8 at 60 Hz:
     # 55 MB/s raw, about 24 MB/s with the default zstd_fast preset (7 GB for five minutes). Live and
@@ -291,6 +297,9 @@ def main(config: Config):
     jaw_closed = config.initial_jaw == "closed"
     gripper_released = returned_home = False
     missed_grasp_stroke_m = None
+    tracker = BoardTracker()
+    solved_after = None  # wall time after which the solved run may end (the last release dwell)
+    moved_since_close = False
     previous_sigint = signal.getsignal(signal.SIGINT)
 
     def log(event, **fields):
@@ -312,7 +321,7 @@ def main(config: Config):
             if config.record_bag:
                 topics = config.bag_topics or (config.camera_topic, config.camera_topic.rsplit("/", 1)[0] + "/camera_info")
                 bag = start_bag(output / "camera_bag", topics, storage_preset=config.bag_storage_preset)
-                log("bag_started", directory=str(bag.directory), topics=list(bag.topics), pid=bag.process.pid)
+                log("bag_started", directory=str(bag.directory), topics=list(bag.topics), pid=bag.process.pid, wall_s=time.time())
             camera = RosCamera(config.camera_topic)
             start_xyz, start_joints = START_POSES[config.start]
             arm = TrossenArm(config.robot_ip, initial_xyz=np.array(start_xyz))
@@ -433,6 +442,11 @@ def main(config: Config):
             if now < busy_until:
                 continue
             # Segment boundary: end of the run is decided here so a dispatched segment always completes.
+            if solved_after is not None and now >= solved_after:
+                status = "task_solved"
+                log("task_solved", elapsed_s=now - epoch, **{k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")})
+                logging.info("Puzzle solved after %.0f s; returning home", now - epoch)
+                break
             if tick >= duration_ticks and not (live and jaw_closed and tick < duration_ticks + grace_ticks):
                 status = "duration_reached"
                 log("duration_reached", elapsed_s=now - epoch, jaw_closed=jaw_closed, grace_expired=live and jaw_closed)
@@ -489,6 +503,7 @@ def main(config: Config):
             busy_until = command_started_at + command.ticks / RATE_HZ
             counts["accepted_commands"] += 1
             if command.kind == "cartesian":
+                moved_since_close = True
                 counts["segments"] += 1
                 counts["stretched_segments"] += int(proposed_executor.last_stretch > 1.0)
                 counts["brakes"] += int(proposed_executor.last_braked)
@@ -507,6 +522,19 @@ def main(config: Config):
                 jaw_closed = not command.jaw_open
                 buffer.generation = worker.invalidate()
                 fresh_image_after = busy_until
+                peg = peg_of(float(buffer.executor.position[1]))
+                if jaw_closed:
+                    moved_since_close = False
+                    ring = tracker.grasp(peg, z_mm=round(float(buffer.executor.position[2]) * 1000, 1), t_s=round(now - epoch, 1))
+                    log("grasp", peg=peg, ring=ring, board=tracker.stacks)
+                else:
+                    move = tracker.release(peg, t_s=round(now - epoch, 1))
+                    log("move", **{k: v for k, v in move.items() if k != "board"}, board=move["board"],
+                        moves_completed=len(tracker.moves), optimal_prefix=tracker.optimal_prefix)
+                    logging.info("Move %d: ring %s %s->%s (%s)", len(tracker.moves), move["ring"], move["from"], move["to"],
+                                 "legal" if move["legal"] else "ILLEGAL")
+                    if tracker.solved and config.stop_when_solved:
+                        solved_after = busy_until
     except CommandRejected as exc:
         status = "rejected_command"
         log("stopped_on_rejected_command", error=str(exc))
@@ -514,6 +542,14 @@ def main(config: Config):
     except MissedGraspError as exc:
         status = "missed_grasp"
         missed_grasp_stroke_m = exc.stroke_m
+        if tracker.held is not None:
+            if moved_since_close:
+                tracker.lost_ring()  # slipped during the carry; where it landed is unknown
+            else:
+                ring, src = tracker.held  # closed on nothing: the ring never left its peg
+                if ring is not None:
+                    tracker.stacks[src].append(ring)
+                tracker.held = None
         log("missed_grasp", stroke_m=exc.stroke_m, minimum_m=exc.minimum_m, error=str(exc))
         logging.error("%s", exc)
     except KeyboardInterrupt:
@@ -594,7 +630,9 @@ def main(config: Config):
             "tracking_error_max_mm": float(max(tracking) * 1000) if tracking else None,
             "replay_slot1_error_mean_mm": float(np.mean(slot1_errors)) if slot1_errors else None,
             "max_tick_lateness_s": max(lateness, default=0.0),
-            "task_success": False if missed_grasp_stroke_m is not None else None,
+            "task_success": tracker.solved,
+            "tag": config.tag,
+            **{k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")},
             "camera_bag": bag_report,
         }
         alignment = getattr(arm, "initial_proprio_alignment", None)
