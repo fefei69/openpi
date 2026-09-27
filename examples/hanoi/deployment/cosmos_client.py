@@ -97,9 +97,16 @@ V4_START_JOINTS_RAD = (0.05512, 1.43154, 1.21085, -0.5648, 0.03789, 0.0403)
 # carry hover at (492.3, -56.3), which the recording only releases from.
 HOVER_A_XYZ_M = (0.496236, -0.057392, 0.191068)
 HOVER_A_JOINTS_RAD = (-0.15583, 1.76183, 1.55087, -0.58042, -0.11006, -0.11089)
+# Grasp hovers over B and C from the same recording (open jaw, next label a grasp; spread under 0.5 mm, 0.003 rad).
+HOVER_B_XYZ_M = (0.494987, 0.013814, 0.191163)
+HOVER_B_JOINTS_RAD = (0.03758, 1.73908, 1.52267, -0.56851, 0.0259, 0.02673)
+HOVER_C_XYZ_M = (0.492427, 0.089022, 0.191243)
+HOVER_C_JOINTS_RAD = (0.24128, 1.77337, 1.56724, -0.59401, 0.16957, 0.17203)
 START_POSES = {
     "episode_start": (V4_START_XYZ_M, V4_START_JOINTS_RAD),  # behind peg B, how every training episode begins
     "above_peg_a": (HOVER_A_XYZ_M, HOVER_A_JOINTS_RAD),  # the grasp hover over A, for comparisons that start there
+    "above_peg_b": (HOVER_B_XYZ_M, HOVER_B_JOINTS_RAD),
+    "above_peg_c": (HOVER_C_XYZ_M, HOVER_C_JOINTS_RAD),
 }
 # Phase bands of the recorded destinations: grasps below 100 mm, releases 120-170 mm, hovers above.
 GRASP_MAX_Z = 0.10

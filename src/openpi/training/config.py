@@ -547,12 +547,22 @@ class LeRobotHanoiDenseDataConfig(DataConfigFactory):
     """Dense contract five: frames indexed from the raw recording, absolute reference-pose chunks."""
 
     dense_archive_path: str = "data/hanoi/dense_v5_pi05/indices/aaaa_to_cccc_train.npz"
+    # Six-task variant: the verbatim task prompt is required and the resolved task is echoed in the reply.
+    multitask: bool = False
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
         horizons = {variant["horizon"] for variant in hanoi_dense_policy.VARIANTS.values()}
         if model_config.model_type != ModelType.PI05 or model_config.action_horizon not in horizons:
             raise ValueError(f"Dense Hanoi requires pi0.5 with a chunk length in {sorted(horizons)}")
+        if self.multitask:
+            import openpi.policies.hanoi_multitask_policy as hanoi_multitask_policy
+
+            inputs = [hanoi_multitask_policy.HanoiMultitaskInputs(horizon=model_config.action_horizon)]
+            outputs = [hanoi_multitask_policy.HanoiMultitaskOutputs(horizon=model_config.action_horizon)]
+        else:
+            inputs = [hanoi_dense_policy.HanoiDenseInputs(horizon=model_config.action_horizon)]
+            outputs = [hanoi_dense_policy.HanoiDenseOutputs(horizon=model_config.action_horizon)]
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=_transforms.Group(
@@ -567,10 +577,7 @@ class LeRobotHanoiDenseDataConfig(DataConfigFactory):
                     )
                 ]
             ),
-            data_transforms=_transforms.Group(
-                inputs=[hanoi_dense_policy.HanoiDenseInputs(horizon=model_config.action_horizon)],
-                outputs=[hanoi_dense_policy.HanoiDenseOutputs(horizon=model_config.action_horizon)],
-            ),
+            data_transforms=_transforms.Group(inputs=inputs, outputs=outputs),
             model_transforms=ModelTransformFactory()(model_config),
             dense_archive_path=self.dense_archive_path,
         )
@@ -767,6 +774,93 @@ _CONFIGS = [
         wandb_log_images=False,
         policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_dense_h16_aaaa_to_cccc"),
         policy_metadata_module="openpi.policies.hanoi_dense_policy",
+    ),
+    TrainConfig(
+        # Chunk-length comparison: 32 steps (3.2 s); otherwise identical to the 16-step comparison run.
+        name="pi05_hanoi_dense_h32_aaaa_to_cccc",
+        assets_base_dir="data/hanoi/dense_v5_pi05_h32/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=32, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id=hanoi_dense_policy.REPO_ID,
+            assets=AssetsConfig(asset_id=hanoi_dense_policy.ASSET_ID),
+            dense_archive_path="data/hanoi/dense_v5_pi05_h32/indices/aaaa_to_cccc_train.npz",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=30_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=30_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=4_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_dense_h32_aaaa_to_cccc"),
+        policy_metadata_module="openpi.policies.hanoi_dense_policy",
+    ),
+    TrainConfig(
+        # Six directed tower moves, the verbatim instruction as the only task signal; dense v5 labels, 16-step chunk,
+        # 32,000 updates (the Cosmos multitask budget). Standard pi0.5 state tokens, as in the h16 run.
+        name="pi05_hanoi_multitask_v6",
+        assets_base_dir="data/hanoi/multitask_v6_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_multitask_v6_raw",
+            assets=AssetsConfig(asset_id="local/hanoi_multitask_v6"),
+            dense_archive_path="data/hanoi/multitask_v6_pi05/indices/multitask_train.npz",
+            multitask=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=32_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=32_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=4_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_multitask_v6"),
+        policy_metadata_module="openpi.policies.hanoi_multitask_policy",
+        policy_output_context_keys=("task",),
+    ),
+    TrainConfig(
+        # Optional second cycle of the six-task run: same data and recipe, fresh optimizer and cosine schedule,
+        # weights initialised from the first cycle's final export (EMA weights), 16,000 further updates.
+        name="pi05_hanoi_multitask_v6_cycle2",
+        assets_base_dir="data/hanoi/multitask_v6_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_multitask_v6_raw",
+            # Same normalization statistics as the first cycle (the archive is shared, so the assets are too).
+            assets=AssetsConfig(
+                assets_dir="data/hanoi/multitask_v6_pi05/assets/pi05_hanoi_multitask_v6",
+                asset_id="local/hanoi_multitask_v6",
+            ),
+            dense_archive_path="data/hanoi/multitask_v6_pi05/indices/multitask_train.npz",
+            multitask=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/pi05_hanoi_multitask_v6/hanoi_multitask_20260926/exports/31999/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=16_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=16_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=4_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_multitask_v6_cycle2"),
+        policy_metadata_module="openpi.policies.hanoi_multitask_policy",
+        policy_output_context_keys=("task",),
     ),
     TrainConfig(
         name=hanoi_waypoint_policy.CONFIG_NAME,

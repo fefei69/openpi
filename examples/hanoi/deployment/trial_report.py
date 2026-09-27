@@ -42,13 +42,14 @@ def failure_reason(summary: dict, events: list) -> str:
 def trial_row(run: Path) -> dict:
     summary = json.loads((run / "summary.json").read_text())
     events = [json.loads(l) for l in (run / "events.jsonl").read_text().splitlines()]
-    r = reconstruct(events).report()
+    r = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C").report()
     solved_t = next((e["monotonic_s"] - events[0]["monotonic_s"] for e in events if e["event"] == "task_solved"), None)
     if solved_t is None and r["solved"] and r["moves"]:
         solved_t = r["moves"][-1]["t_s"]
     return {
         "run": run.name, "date": datetime.datetime.fromtimestamp(run.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
         "tag": summary.get("tag", ""), "family": summary.get("policy_family"), "config": summary.get("config_name"),
+        "task": summary.get("task_direction") or "AAAA_to_CCCC",
         "status": summary.get("status"), "moves": r["moves_completed"], "legal": r["legal_moves"],
         "optimal_prefix": r["optimal_prefix"], "remaining": r["remaining_moves"], "progress": r["progress"],
         "solved": r["solved"], "solve_time_s": None if solved_t is None else round(solved_t, 1),
@@ -101,11 +102,11 @@ def main():
              f"mean optimal prefix {np.mean([r['optimal_prefix'] for r in rows]):.1f} moves; "
              f"median moves {np.median([r['moves'] for r in rows]):.0f}; "
              f"solve time {np.mean([r['solve_time_s'] for r in rows if r['solve_time_s']]) if solved else float('nan'):.0f} s mean over solved runs", "",
-             "| # | run | status | moves (legal) | optimal prefix | remaining | progress | solve time | brakes | tracking p95 | reason |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+             "| # | run | task | status | moves (legal) | optimal prefix | remaining | progress | solve time | brakes | tracking p95 | reason |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for k, r in enumerate(rows, 1):
         pct = f"{100 * r['progress']:.0f}%" if r['progress'] is not None else ""
-        lines.append(f"| {k} | {r['run']} | {r['status']} | {r['moves']} ({r['legal']}) | {r['optimal_prefix']} | {r['remaining']} | {pct} | "
+        lines.append(f"| {k} | {r['run']} | {r['task']} | {r['status']} | {r['moves']} ({r['legal']}) | {r['optimal_prefix']} | {r['remaining']} | {pct} | "
                      f"{r['solve_time_s'] or ''} | {r['brakes']} | {r['tracking_p95_mm']} | {r['reason']} |")
     text = "\n".join(lines) + "\n"
     (dest / "trials.md").write_text(text)

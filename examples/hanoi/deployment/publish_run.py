@@ -76,11 +76,13 @@ def main():
     family = summary.get("policy_family") or "unknown"
     cosmos = family.startswith("cosmos")
     dest = args.dest or ((COSMOS_ROOT if cosmos else OPENPI_ROOT) / "exp_vid")
-    moves = reconstruct(events).report()
+    moves = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C").report()
     horizon = summary.get("action_horizon")
     variant = f"h{horizon}" if horizon else ((summary.get("config_name") or "").replace("pi05_hanoi_", "").replace("cosmos_hanoi_", "").replace("_aaaa_to_cccc", "") or "policy")
     status = "solved" if moves["solved"] else summary["status"]
     date = datetime.datetime.fromtimestamp(run.stat().st_mtime).strftime("%Y-%m-%d")
+    task = summary.get("task_direction")
+    variant = f"{variant}_{task}" if task and task != "AAAA_to_CCCC" else variant
     name = args.name or f"{date}_{family}_{variant}_{len(moves['moves']):02d}moves_{status}"
     if summary.get("tag"):
         name = f"{summary['tag']}_{name}"
@@ -113,7 +115,7 @@ def main():
     lines = [f"# {name}", "",
              f"Run: `{run}`  ",
              f"Policy: {family}, config `{summary.get('config_name')}`, export `{(summary.get('server_export_sha256') or '')[:16]}`, "
-             f"adapter `{summary.get('execution_adapter')}`, start `{summary.get('start')}`  ",
+             f"adapter `{summary.get('execution_adapter')}`, start `{summary.get('start')}`, task `{summary.get('task_direction') or 'AAAA_to_CCCC'}`  ",
              f"Status: {summary['status']}; duration {duration:.0f} s; segments {summary.get('segments')}, brakes {summary.get('brakes')}, "
              f"rejected {summary.get('rejected_commands')}, tracking p95 {summary.get('tracking_error_p95_mm') or 0:.1f} mm, "
              f"inference {1000 * (summary.get('latency_median_s') or summary.get('inference_median_s') or 0):.0f} ms  ",

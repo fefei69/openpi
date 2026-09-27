@@ -21,8 +21,12 @@ import numpy as np
 
 RINGS = 4
 PEGS = ("A", "B", "C")
-START = {"A": [4, 3, 2, 1], "B": [], "C": []}
-GOAL = {"A": [], "B": [], "C": [4, 3, 2, 1]}
+def all_on(peg: str) -> dict:
+    return {p: ([4, 3, 2, 1] if p == peg else []) for p in PEGS}
+
+
+START = all_on("A")
+GOAL = all_on("C")
 LEVELS_MM = np.array([57.1, 67.8, 77.5, 87.7])
 
 
@@ -30,7 +34,12 @@ def peg_of(y_m: float) -> str:
     return "A" if y_m < -0.02 else ("B" if y_m < 0.05 else "C")
 
 
-def optimal_solution(n: int = RINGS, source="A", target="C", spare="B") -> list:
+def spare_of(source: str, target: str) -> str:
+    return next(p for p in PEGS if p not in (source, target))
+
+
+def optimal_solution(n: int = RINGS, source="A", target="C", spare=None) -> list:
+    spare = spare or spare_of(source, target)
     if n == 0:
         return []
     return optimal_solution(n - 1, source, spare, target) + [(n, source, target)] + optimal_solution(n - 1, spare, target, source)
@@ -56,12 +65,12 @@ def _legal_moves(stacks: dict):
                 yield nxt
 
 
-def remaining_moves(stacks: dict) -> int | None:
-    """Fewest legal moves from ``stacks`` to the goal; None if the board is not a valid Hanoi state."""
+def remaining_moves(stacks: dict, goal_peg: str = "C") -> int | None:
+    """Fewest legal moves from ``stacks`` to all rings on ``goal_peg``; None if the board is not a valid Hanoi state."""
     rings = sorted(r for p in PEGS for r in stacks[p])
     if rings != list(range(1, RINGS + 1)) or any(list(stacks[p]) != sorted(stacks[p], reverse=True) for p in PEGS):
         return None
-    start, goal = _key(stacks), _key(GOAL)
+    start, goal = _key(stacks), _key(all_on(goal_peg))
     if start == goal:
         return 0
     seen = {start}
@@ -80,11 +89,18 @@ def remaining_moves(stacks: dict) -> int | None:
 
 @dataclasses.dataclass
 class BoardTracker:
-    stacks: dict = dataclasses.field(default_factory=lambda: {p: list(v) for p, v in START.items()})
+    start_peg: str = "A"
+    goal_peg: str = "C"
+    stacks: dict = None
     held: tuple | None = None  # (ring, source peg) while a ring is in the gripper
     moves: list = dataclasses.field(default_factory=list)
     grasps: list = dataclasses.field(default_factory=list)
     uncertain: bool = False  # a ring was lost mid-carry; the board is no longer known
+
+    def __post_init__(self):
+        if self.stacks is None:
+            self.stacks = all_on(self.start_peg)
+        self.optimal = optimal_solution(RINGS, self.start_peg, self.goal_peg)
 
     def grasp(self, peg: str, z_mm: float | None = None, t_s: float | None = None):
         ring = self.stacks[peg][-1] if self.stacks[peg] else None
@@ -116,12 +132,12 @@ class BoardTracker:
 
     @property
     def solved(self) -> bool:
-        return not self.uncertain and self.held is None and self.stacks == GOAL
+        return not self.uncertain and self.held is None and self.stacks == all_on(self.goal_peg)
 
     @property
     def optimal_prefix(self) -> int:
         n = 0
-        for move, (ring, src, dst) in zip(self.moves, OPTIMAL):
+        for move, (ring, src, dst) in zip(self.moves, self.optimal):
             if move["legal"] and (move["ring"], move["from"], move["to"]) == (ring, src, dst):
                 n += 1
             else:
@@ -129,9 +145,11 @@ class BoardTracker:
         return n
 
     def report(self) -> dict:
-        remaining = None if self.uncertain else remaining_moves(self.stacks if self.held is None else self._with_held_back())
-        total = len(OPTIMAL)
+        remaining = None if self.uncertain else remaining_moves(self.stacks if self.held is None else self._with_held_back(), self.goal_peg)
+        total = len(self.optimal)
         return {
+            "start_peg": self.start_peg,
+            "goal_peg": self.goal_peg,
             "moves_completed": len(self.moves),
             "legal_moves": sum(1 for m in self.moves if m["legal"]),
             "all_legal": all(m["legal"] for m in self.moves),
@@ -153,9 +171,9 @@ class BoardTracker:
         return board
 
 
-def reconstruct(events: list) -> BoardTracker:
+def reconstruct(events: list, start_peg: str = "A", goal_peg: str = "C") -> BoardTracker:
     """Replay a run's logged gripper commands (and a missed-grasp stop) through a tracker."""
-    tracker = BoardTracker()
+    tracker = BoardTracker(start_peg, goal_peg)
     t0 = events[0]["monotonic_s"]
     for e in events:
         if e["event"] == "command" and e["kind"] == "gripper":

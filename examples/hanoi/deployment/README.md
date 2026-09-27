@@ -495,6 +495,18 @@ above peg A, raw output): all 15 moves of the solution in 270 s, every move lega
 commands, every grasp within 1.1 mm of its ring level, grip strokes 15 / 20 / 25 / 31 mm for rings 1 to 4, tracking
 error 2.0 mm p95. The operator stopped the run 18 s after the last release and the arm returned home.
 
+Six-task server (contract six): `pi05_hanoi_multitask_v6_cycle2` (`hanoi_multitask_20260926_cycle2`, export 15999,
+16-step chunk, prefix 3, trained on two new recordings of 10 episodes per direction; test slot-1 error 0.53 mm, jaw
+100%, language probe 97% correct on same-start pairs) publishes its identity as `hanoi_multitask` with six verbatim
+prompts and no default task. The client picks the task with `--task <direction>` (AAAA_to_CCCC, CCCC_to_AAAA,
+AAAA_to_BBBB, BBBB_to_AAAA, BBBB_to_CCCC, CCCC_to_BBBB), sends that task's prompt on every request, checks the task
+the server echoes, starts above the task's start peg (`--start auto`; hovers over B and C come from the recording like
+A's), and tracks progress from that start peg to that goal peg. Set the board up with all rings on the start peg.
+`./run_dense_server.sh --config-name pi05_hanoi_multitask_v6_cycle2`, then
+`./run_dense_client.sh --mode live --duration-s 420 --record-bag --task CCCC_to_AAAA --tag <series>`. The published
+folder name and the trial report carry the task. The start hovers were measured on the September 15 recording; the
+new recordings' peg A column sits about 1.7 mm further out, which the dense model absorbs on its first chunk.
+
 Task progress and trials: [progress.py](progress.py) follows the ring stacks from the gripper events (standard start
 A = [4, 3, 2, 1]) and reports moves made and their legality, the optimal prefix (leading moves matching the 15-move
 solution), the fewest moves remaining from the final board (breadth-first search over the 81 boards) and

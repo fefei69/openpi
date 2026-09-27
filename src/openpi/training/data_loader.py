@@ -200,8 +200,22 @@ class RawFrameChunkDataset(Dataset):
         if require_validated and not bool(rows["validated"]):
             raise ValueError("Dense archive has not been validated")
         self.horizon = int(rows["horizon"])
-        self.source_path = str(rows["source_path"])
-        self.prompt = str(rows["prompt"])
+        # Single-recording archives carry `source_path`/`prompt`; multi-task archives carry per-task
+        # `source_paths`/`prompts` and a `task_indices` column selecting the recording and prompt per row.
+        if "source_paths" in rows:
+            self.source_paths = [str(x) for x in rows["source_paths"]]
+            self.prompts = [str(x) for x in rows["prompts"]]
+            self.task_indices = rows["task_indices"].astype(np.int64)
+            if self.task_indices.shape != rows["source_observation_indices"].shape or np.any(self.task_indices < 0) or np.any(
+                self.task_indices >= len(self.source_paths)
+            ):
+                raise ValueError("Dense multi-task archive has malformed task indices")
+        else:
+            self.source_paths = [str(rows["source_path"])]
+            self.prompts = [str(rows["prompt"])]
+            self.task_indices = np.zeros(len(rows["source_observation_indices"]), dtype=np.int64)
+        self.source_path = self.source_paths[0]
+        self.prompt = self.prompts[0]
         observations = rows["source_observation_indices"]
         targets = rows["source_action_indices"]
         padding = rows["actions_is_pad"]
@@ -209,8 +223,12 @@ class RawFrameChunkDataset(Dataset):
         states = rows["states"]
         bounds = rows["source_episode_bounds"]
         n = len(observations)
-        if observations.ndim != 1 or n == 0 or np.any(observations[1:] <= observations[:-1]):
-            raise ValueError("Dense observations must be a nonempty strictly increasing row index array")
+        if observations.ndim != 1 or n == 0:
+            raise ValueError("Dense observations must be a nonempty row index array")
+        for task in np.unique(self.task_indices):
+            rows_of_task = observations[self.task_indices == task]
+            if np.any(rows_of_task[1:] <= rows_of_task[:-1]):
+                raise ValueError("Dense observations must be strictly increasing within each recording")
         if actions.shape != (n, self.horizon, 4) or not np.isfinite(actions).all():
             raise ValueError("Dense actions must be finite (n, horizon, 4) reference poses")
         if states.ndim != 2 or states.shape[0] != n or not np.isfinite(states).all():
@@ -234,30 +252,34 @@ class RawFrameChunkDataset(Dataset):
         if not np.isin(actions[..., 3], (0, 1)).all():
             raise ValueError("Dense jaw intent must be binary")
         self._pid = None
-        self._handle = None
+        self._handles = {}
 
     def __len__(self) -> int:
         return len(self.rows["source_observation_indices"])
 
-    def _frames(self):
+    def _frames(self, task: int = 0):
         import h5py
 
-        if self._handle is None or self._pid != os.getpid():
-            self._handle = h5py.File(self.source_path, "r")
+        if self._pid != os.getpid():
+            self._handles = {}
             self._pid = os.getpid()
-        return self._handle["pixels"]
+        if task not in self._handles:
+            self._handles[task] = h5py.File(self.source_paths[task], "r")
+        return self._handles[task]["pixels"]
 
     def __getitem__(self, index: SupportsIndex) -> dict:
         i = int(index)
         row = int(self.rows["source_observation_indices"][i])
+        task = int(self.task_indices[i])
         return {
-            "image": np.asarray(self._frames()[row]),
+            "image": np.asarray(self._frames(task)[row]),
             "state": self.rows["states"][i].copy(),
             "actions": self.rows["actions"][i].copy(),
             "actions_is_pad": self.rows["actions_is_pad"][i].copy(),
-            "prompt": self.prompt,
+            "prompt": self.prompts[task],
             "episode_index": int(self.rows["episode_indices"][i]),
             "source_row": row,
+            "task": task,
         }
 
 

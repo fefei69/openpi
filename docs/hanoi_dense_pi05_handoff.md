@@ -144,6 +144,15 @@ exact on 98.3% vs 95.2% of moving rows; 0.11 vs 1.49 rows error from dwells). It
 batched-evaluator numerics. Both exports are transfer-ready; v5 is the guide's specified horizon, H=16 requires
 the client to accept `action_horizon: 16`.
 
+## 8c. Comparison run: 32-step chunk (2026-09-21)
+
+A third run identical except `action_horizon=32` (`hanoi_dense_h32_20260920`; see
+[`hanoi_dense_pi05_h32_results_20260921.md`](hanoi_dense_pi05_h32_results_20260921.md)) reproduces v5 within seed
+noise on every position metric (slot 1 0.591 vs 0.592 mm; first-16-slot mean 2.19 mm for both) and shows the same
+gripper timing as v5 (95% exact on moving rows) rather than the 16-step run's 98%. Parity passed (0.292 mm). Its
+archive is identical to the Cosmos chunk-32 build on all 32 slots. Conclusion across the three horizons: the
+executed prefix is the same; only the 16-step chunk improves gripper timing, and longer chunks buy nothing offline.
+
 ## 9. Deviations from the guide
 
 1. Data root `data/hanoi/dense_v5_pi05/` instead of `data/hanoi/dense_v5/` (separate from the Cosmos build).

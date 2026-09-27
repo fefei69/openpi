@@ -42,3 +42,13 @@ def test_reconstruct_from_events_handles_a_missed_grasp():
     r = progress.reconstruct(events).report()
     assert r["moves_completed"] == 1 and r["optimal_prefix"] == 1 and r["final_board"] == {"A": [4, 3, 2], "B": [1], "C": []}
     assert r["remaining_moves"] == 14 and not r["board_uncertain"]
+
+
+def test_tracker_handles_other_directions():
+    t = progress.BoardTracker("C", "A")
+    assert t.stacks == {"A": [], "B": [], "C": [4, 3, 2, 1]} and t.optimal[0] == (1, "C", "B") and len(t.optimal) == 15
+    for ring, src, dst in t.optimal:
+        t.grasp(src); t.release(dst)
+    r = t.report()
+    assert r["solved"] and r["progress"] == 1.0 and r["start_peg"] == "C" and r["goal_peg"] == "A"
+    assert progress.remaining_moves(progress.all_on("B"), "C") == 15 and progress.remaining_moves(progress.all_on("C"), "C") == 0

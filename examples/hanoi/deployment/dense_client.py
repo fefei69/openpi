@@ -65,13 +65,16 @@ SELECTED_EXPORTS = {
     "pi05_hanoi_dense_h16_aaaa_to_cccc": "1d8cb8e63fee3cfaea629c0cd953b3f1b309e150d33ecc6213b0b0bdd61288e9",  # 16-step chunk
     # Cosmos dense v5, video init, cycle 2, iter 16000 (weights file SHA-256): 16-step chunk, prefix 8.
     "cosmos_hanoi_dense_v5_h16": "ab1a1ccfa5675c7ee49102e043a14141810994f54a44ff8f9368389632c301b7",
+    # pi0.5 six-task contract six, cycle 2, export 15999: 16-step chunk, prefix 3, verbatim task prompt required.
+    "pi05_hanoi_multitask_v6_cycle2": "405106fdbd4338e4dc0b801b576988e7df8aa7cd3dd0cb8f8f4d372b6b1aba4a",
 }
 SELECTED_EXPORT_SHA256 = SELECTED_EXPORTS["pi05_hanoi_dense_aaaa_to_cccc"]
 ALLOWED_HORIZONS = (30, 16)
 # Execution prefixes the trained contracts declare: 3 (pi0.5, 0.1 s inference) and 8 (Cosmos, 0.5 s).
 ALLOWED_PREFIXES = (3, 8)
+IDENTITY_KEYS = ("hanoi_dense", "hanoi_multitask")
+ALLOWED_VERSIONS = (5, 6)
 EXPECTED_CONTRACT = {
-    "version": 5,
     "robot": "trossen_wxai_single",
     "reference_rate_hz": RATE_HZ // ROW_TICKS,
     "state": [f"joint_{i}_rad" for i in range(6)] + ["jaw_stroke_m"],
@@ -83,6 +86,7 @@ EXPECTED_CONTRACT = {
     "max_image_age_s": MAX_IMAGE_AGE_S,
     "jaw_open_stroke_m": INITIAL_JAW_M,
 }
+SINGLE_TASK = {"index": 0, "direction": "AAAA_to_CCCC", "start_peg": "A", "goal_peg": "C"}
 EXECUTION_ADAPTER = "{family}_v5_h{horizon}_track_{rows}rows"
 
 
@@ -121,7 +125,9 @@ class Config:
     max_segment_stretch: float = 6.0
     # episode_start: behind peg B, how every training episode begins. above_peg_a: the recorded grasp
     # hover over A, for comparisons with methods that start there; the first chunk is then the descent.
-    start: Literal["episode_start", "above_peg_a"] = "above_peg_a"
+    start: Literal["auto", "episode_start", "above_peg_a", "above_peg_b", "above_peg_c"] = "auto"
+    # Task for a six-task (contract six) server, by direction, e.g. CCCC_to_AAAA; ignored by single-task servers.
+    task: str = "AAAA_to_CCCC"
     max_start_joint_error_rad: float = 0.05
     return_home_after_duration: bool = True
     finish_grace_s: float = 30.0
@@ -141,11 +147,19 @@ class Config:
 # ---- contract, transport ----
 
 
-def check_contract(metadata, *, expected_export_sha256: str | None = None) -> dict:
-    identity = metadata.get("hanoi_dense") if isinstance(metadata, dict) else None
+def check_contract(metadata, *, expected_export_sha256: str | None = None, task: str = "AAAA_to_CCCC") -> dict:
+    """Validate a dense (contract five) or six-task (contract six) identity; returns it with the resolved task and prompt."""
+    identity = identity_key = None
+    if isinstance(metadata, dict):
+        for identity_key in IDENTITY_KEYS:
+            if isinstance(metadata.get(identity_key), dict):
+                identity = metadata[identity_key]
+                break
     if not isinstance(identity, dict) or not isinstance(identity.get("contract"), dict):
-        raise ValueError("Server is not a Hanoi dense contract-five policy server")
+        raise ValueError("Server is not a Hanoi dense contract-five or six-task policy server")
     contract = identity["contract"]
+    if contract.get("version") not in ALLOWED_VERSIONS:
+        raise ValueError(f"Contract mismatch for version: server {contract.get('version')!r}, client {ALLOWED_VERSIONS}")
     for key, expected in EXPECTED_CONTRACT.items():
         actual = contract.get(key)
         if key == "orientation_rpy_rad":
@@ -158,8 +172,16 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None) -> di
         raise ValueError(f"Contract mismatch for execution_prefix: server {contract.get('execution_prefix')!r}, client {ALLOWED_PREFIXES}")
     if contract.get("action_horizon") not in ALLOWED_HORIZONS:
         raise ValueError(f"Contract mismatch for action_horizon: server {contract.get('action_horizon')!r}, client {ALLOWED_HORIZONS}")
-    if identity.get("prompt") != PROMPT:
-        raise ValueError("Server prompt is not the trained AAAA-to-CCCC instruction")
+    if identity_key == "hanoi_multitask":
+        tasks = {t["direction"]: t for t in contract.get("tasks", []) if isinstance(t, dict)}
+        if task not in tasks or not tasks[task].get("prompt") or tasks[task]["prompt"] not in (identity.get("prompts") or []):
+            raise ValueError(f"Task {task!r} is not one of the server's tasks {sorted(tasks)}")
+        resolved = {k: tasks[task][k] for k in ("index", "direction", "start_peg", "goal_peg")}
+        prompt = tasks[task]["prompt"]
+    else:
+        if identity.get("prompt") != PROMPT:
+            raise ValueError("Server prompt is not the trained AAAA-to-CCCC instruction")
+        resolved, prompt = dict(SINGLE_TASK), PROMPT
     if expected_export_sha256 == "selected":
         expected_export_sha256 = SELECTED_EXPORTS.get(identity.get("config_name"))
         if expected_export_sha256 is None:
@@ -167,20 +189,24 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None) -> di
     if expected_export_sha256 and identity.get("export_sha256") != expected_export_sha256:
         raise ValueError("Server export is not the selected checkpoint")
     return {**identity, "action_horizon": int(contract["action_horizon"]), "execution_prefix": int(contract["execution_prefix"]),
-            "policy_family": identity.get("model", "pi05_dense")}
+            "policy_family": identity.get("model", "pi05_multitask" if identity_key == "hanoi_multitask" else "pi05_dense"),
+            "task": resolved, "task_prompt": prompt, "multitask": identity_key == "hanoi_multitask"}
 
 
 class DenseWebSocketPolicy:
     """Bounded-time OpenPI-protocol transport used by the inference worker."""
 
-    def __init__(self, uri: str, *, timeout_s: float, warmup_timeout_s: float, expected_export_sha256: str | None):
+    def __init__(self, uri: str, *, timeout_s: float, warmup_timeout_s: float, expected_export_sha256: str | None,
+                 task: str = "AAAA_to_CCCC"):
         self.timeout_s, self.warmup_timeout_s, self.first = timeout_s, warmup_timeout_s, True
         self.ws = connect(uri, compression=None, max_size=16 * 1024 * 1024, open_timeout=5, close_timeout=0.2)
         try:
             self.metadata = msgpack_numpy.unpackb(self.ws.recv(timeout=5))
-            self.identity = check_contract(self.metadata, expected_export_sha256=expected_export_sha256)
+            self.identity = check_contract(self.metadata, expected_export_sha256=expected_export_sha256, task=task)
             self.horizon = self.identity["action_horizon"]
             self.execution_prefix = self.identity["execution_prefix"]
+            self.task = self.identity["task"]
+            self.prompt = self.identity["task_prompt"]
         except BaseException:
             self.ws.close()
             raise
@@ -194,6 +220,8 @@ class DenseWebSocketPolicy:
         reply = msgpack_numpy.unpackb(reply)
         if int(reply.get("execution_prefix", self.execution_prefix)) != self.execution_prefix or int(reply.get("reference_rate_hz", 10)) != RATE_HZ // ROW_TICKS:
             raise ValueError("Server changed the execution prefix or reference rate")
+        if "task_direction" in reply and str(reply["task_direction"]) != self.task["direction"]:
+            raise ValueError(f"Server resolved task {reply['task_direction']!r} for a {self.task['direction']} request")
         return reply
 
     def close(self):
@@ -203,13 +231,13 @@ class DenseWebSocketPolicy:
 # ---- observations ----
 
 
-def observation_data(image: np.ndarray, joints: np.ndarray, jaw_stroke_m: float, xyz: np.ndarray) -> dict:
+def observation_data(image: np.ndarray, joints: np.ndarray, jaw_stroke_m: float, xyz: np.ndarray, prompt: str = PROMPT) -> dict:
     """The dense contract's request; the measured XYZ rides along for analysis only."""
     return {
         "observation/image": np.ascontiguousarray(image, dtype=np.uint8),
         "observation/state": np.r_[np.asarray(joints, np.float32), np.float32(jaw_stroke_m)].astype(np.float32),
         "observation/cartesian_position": np.asarray(xyz, np.float32),
-        "prompt": PROMPT,
+        "prompt": prompt,
     }
 
 
@@ -226,7 +254,7 @@ class ReplayEpisode:
         self.reference_velocity = np.gradient(self.reference, 1 / RATE_HZ, axis=0)
         self.reference_acceleration = np.gradient(self.reference_velocity, 1 / RATE_HZ, axis=0)
 
-    def observe(self, tick: int, row: int) -> tuple[Observation, np.ndarray]:
+    def observe(self, tick: int, row: int, prompt: str = PROMPT) -> tuple[Observation, np.ndarray]:
         row = min(row, self.length - 1)
         joints = np.asarray(self.h5["joint_positions"][row], np.float32)
         proprio = np.asarray(self.h5["proprio"][row], np.float64)
@@ -234,7 +262,7 @@ class ReplayEpisode:
         age = (int(self.h5["command_monotonic_ns"][row]) - int(self.h5["image_receipt_monotonic_ns"][row])) / 1e9
         captured = time.monotonic()
         state = np.r_[proprio[:6], proprio[6]].astype(np.float32)
-        return Observation(tick, captured, captured - age, observation_data(image, joints, proprio[6], proprio[:3])), state
+        return Observation(tick, captured, captured - age, observation_data(image, joints, proprio[6], proprio[:3], prompt)), state
 
     def commanded_state(self, row: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         row = min(row, self.length - 1)
@@ -249,13 +277,13 @@ class ReplayEpisode:
         self.h5.close()
 
 
-def observe_hardware(arm, camera, tick, *, require_orientation, jaw_closed, min_grasp_stroke_m):
+def observe_hardware(arm, camera, tick, *, require_orientation, jaw_closed, min_grasp_stroke_m, prompt=PROMPT):
     state, joints = arm.read_joints(require_orientation=require_orientation)
     if jaw_closed:
         check_grasp(float(state[6]), min_grasp_stroke_m)
     frame = camera.latest()
     captured = time.monotonic()
-    return Observation(tick, captured, frame.received_at, observation_data(frame.rgb, joints, state[6], state[:3])), state
+    return Observation(tick, captured, frame.received_at, observation_data(frame.rgb, joints, state[6], state[:3], prompt)), state
 
 
 # ---- main ----
@@ -297,7 +325,7 @@ def main(config: Config):
     jaw_closed = config.initial_jaw == "closed"
     gripper_released = returned_home = False
     missed_grasp_stroke_m = None
-    tracker = BoardTracker()
+    tracker = None
     solved_after = None  # wall time after which the solved run may end (the last release dwell)
     moved_since_close = False
     previous_sigint = signal.getsignal(signal.SIGINT)
@@ -308,11 +336,26 @@ def main(config: Config):
 
     def observe(tick):
         if episode is not None:
-            return episode.observe(tick, config.start_row + tick)
+            return episode.observe(tick, config.start_row + tick, policy.prompt)
         return observe_hardware(arm, camera, tick, require_orientation=live, jaw_closed=jaw_closed,
-                                min_grasp_stroke_m=config.min_grasp_stroke_m)
+                                min_grasp_stroke_m=config.min_grasp_stroke_m, prompt=policy.prompt)
 
     try:
+        # The server first: its identity fixes the task, hence the start peg, the prompt and the goal.
+        policy = DenseWebSocketPolicy(config.server, timeout_s=config.inference_timeout_s,
+                                      warmup_timeout_s=config.warmup_timeout_s,
+                                      expected_export_sha256=config.expected_export_sha256 or None, task=config.task)
+        (output / "server_metadata.json").write_text(json.dumps(policy.metadata, indent=2, default=str) + "\n")
+        task = policy.task
+        logging.info("Server: %s (%d-step chunks, prefix %d), export %s on %s; task %s (%s -> %s)", policy.identity.get("config_name"),
+                     policy.horizon, policy.execution_prefix, policy.identity["export_sha256"][:16], policy.identity.get("gpu"),
+                     task["direction"], task["start_peg"], task["goal_peg"])
+        if not policy.execution_prefix <= config.prefix_rows <= policy.horizon - 4:
+            raise ValueError(f"--prefix-rows {config.prefix_rows} must lie between the server's execution prefix "
+                             f"{policy.execution_prefix} and its chunk length minus four rows of latency slack ({policy.horizon - 4})")
+        start_name = f"above_peg_{task['start_peg'].lower()}" if config.start == "auto" else config.start
+        tracker = BoardTracker(task["start_peg"], task["goal_peg"])
+        log("task", **task, prompt=policy.prompt, start=start_name)
         if config.mode == "replay":
             episode = ReplayEpisode(config.episode)
             if config.start_row + int(config.duration_s * RATE_HZ) >= episode.length:
@@ -323,13 +366,13 @@ def main(config: Config):
                 bag = start_bag(output / "camera_bag", topics, storage_preset=config.bag_storage_preset)
                 log("bag_started", directory=str(bag.directory), topics=list(bag.topics), pid=bag.process.pid, wall_s=time.time())
             camera = RosCamera(config.camera_topic)
-            start_xyz, start_joints = START_POSES[config.start]
+            start_xyz, start_joints = START_POSES[start_name]
             arm = TrossenArm(config.robot_ip, initial_xyz=np.array(start_xyz))
             arm.orientation_limit_deg = config.max_orientation_error_deg
             if live:
                 signal.signal(signal.SIGINT, signal.default_int_handler)
                 logging.info("Moving arm to the recorded %s pose %s and aligning XYZ within 0.5 mm",
-                             config.start, np.round(start_xyz, 4).tolist())
+                             start_name, np.round(start_xyz, 4).tolist())
                 log("robot_initialized", **arm.initialize())
         deadline = time.monotonic() + 5
         while True:
@@ -350,15 +393,6 @@ def main(config: Config):
 
         Image.fromarray(initial.data["observation/image"]).save(output / "camera_crop.png")
 
-        policy = DenseWebSocketPolicy(config.server, timeout_s=config.inference_timeout_s,
-                                      warmup_timeout_s=config.warmup_timeout_s,
-                                      expected_export_sha256=config.expected_export_sha256 or None)
-        (output / "server_metadata.json").write_text(json.dumps(policy.metadata, indent=2, default=str) + "\n")
-        logging.info("Server: %s (%d-step chunks, prefix %d), export %s on %s", policy.identity.get("config_name"), policy.horizon,
-                     policy.execution_prefix, policy.identity["export_sha256"][:16], policy.identity.get("gpu"))
-        if not policy.execution_prefix <= config.prefix_rows <= policy.horizon - 4:
-            raise ValueError(f"--prefix-rows {config.prefix_rows} must lie between the server's execution prefix "
-                             f"{policy.execution_prefix} and its chunk length minus four rows of latency slack ({policy.horizon - 4})")
         worker = InferenceWorker(policy, record_dir=output, horizon=policy.horizon)
         logging.info("Warming up transport without motion")
         worker.submit(initial)
@@ -374,7 +408,7 @@ def main(config: Config):
         if live:
             log("policy_start_pose_verified", **arm.verify_initial_pose(state, jaw_open=jaw_open))
             log("start_joints_verified", **start_joint_report(
-                initial.data["observation/state"][:6], START_POSES[config.start][1], max_error_rad=config.max_start_joint_error_rad))
+                initial.data["observation/state"][:6], START_POSES[start_name][1], max_error_rad=config.max_start_joint_error_rad))
             if not 0 <= initial.image_age_s <= MAX_IMAGE_AGE_S:
                 raise ValueError("Camera stale after warmup")
             if np.any(state[:3] < bounds[0]) or np.any(state[:3] > bounds[1]):
@@ -542,7 +576,7 @@ def main(config: Config):
     except MissedGraspError as exc:
         status = "missed_grasp"
         missed_grasp_stroke_m = exc.stroke_m
-        if tracker.held is not None:
+        if tracker is not None and tracker.held is not None:
             if moved_since_close:
                 tracker.lost_ring()  # slipped during the carry; where it landed is unknown
             else:
@@ -612,7 +646,7 @@ def main(config: Config):
             "prefix_rows": config.prefix_rows,
             "policy_family": policy.identity["policy_family"] if policy is not None else None,
             "execution_prefix": policy.execution_prefix if policy is not None else None,
-            "start": config.start,
+            "start": start_name if policy is not None else config.start,
             "config_name": policy.identity.get("config_name") if policy is not None else None,
             "action_horizon": policy.horizon if policy is not None else None,
             "server_export_sha256": policy.identity.get("export_sha256") if policy is not None else None,
@@ -630,9 +664,11 @@ def main(config: Config):
             "tracking_error_max_mm": float(max(tracking) * 1000) if tracking else None,
             "replay_slot1_error_mean_mm": float(np.mean(slot1_errors)) if slot1_errors else None,
             "max_tick_lateness_s": max(lateness, default=0.0),
-            "task_success": tracker.solved,
+            "task_success": tracker.solved if tracker is not None else None,
             "tag": config.tag,
-            **{k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")},
+            "task_direction": policy.task["direction"] if policy is not None else None,
+            "task_prompt": policy.prompt if policy is not None else None,
+            **({k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")} if tracker is not None else {}),
             "camera_bag": bag_report,
         }
         alignment = getattr(arm, "initial_proprio_alignment", None)

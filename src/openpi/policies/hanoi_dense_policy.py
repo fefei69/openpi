@@ -47,14 +47,42 @@ CONTRACT = {
     "prompt": PROMPT,
 }
 
-# Comparison variants share the contract except for the chunk length; each has its own archive root.
+# Variants share the dense label rule; each has its own archive root and authorized budget. The six-task
+# contract lives in hanoi_multitask_policy (which imports this module), hence the lazy lookup below.
 VARIANTS = {
-    CONFIG_NAME: {"horizon": HORIZON, "data_root": "data/hanoi/dense_v5_pi05"},
-    "pi05_hanoi_dense_h16_aaaa_to_cccc": {"horizon": 16, "data_root": "data/hanoi/dense_v5_pi05_h16"},
+    CONFIG_NAME: {"horizon": HORIZON, "data_root": "data/hanoi/dense_v5_pi05", "updates": 30_000},
+    "pi05_hanoi_dense_h16_aaaa_to_cccc": {"horizon": 16, "data_root": "data/hanoi/dense_v5_pi05_h16", "updates": 30_000},
+    "pi05_hanoi_dense_h32_aaaa_to_cccc": {"horizon": 32, "data_root": "data/hanoi/dense_v5_pi05_h32", "updates": 30_000},
+    "pi05_hanoi_multitask_v6": {"horizon": 16, "data_root": "data/hanoi/multitask_v6_pi05", "updates": 32_000, "multitask": True},
+    # Second cycle: fresh optimizer and schedule, initialised from the first cycle's final export.
+    "pi05_hanoi_multitask_v6_cycle2": {
+        "horizon": 16,
+        "data_root": "data/hanoi/multitask_v6_pi05",
+        "updates": 16_000,
+        "multitask": True,
+        "archive_config": "pi05_hanoi_multitask_v6",
+    },
 }
 
 
+def is_multitask(config_name: str) -> bool:
+    return bool(VARIANTS[config_name].get("multitask", False))
+
+
+def updates_for(config_name: str) -> int:
+    return int(VARIANTS[config_name]["updates"])
+
+
+def archive_config_for(config_name: str) -> str:
+    """Config whose name the validated archive is stamped with (a continuation reuses its parent's archive)."""
+    return str(VARIANTS[config_name].get("archive_config", config_name))
+
+
 def contract_for(config_name: str) -> dict:
+    if is_multitask(config_name):
+        from openpi.policies import hanoi_multitask_policy
+
+        return hanoi_multitask_policy.CONTRACT
     return {**CONTRACT, "action_horizon": VARIANTS[config_name]["horizon"]}
 
 
@@ -115,7 +143,8 @@ def serving_metadata(train_config, checkpoint_dir: pathlib.Path | str) -> dict:
     """Identity published by the policy server next to the static contract."""
     checkpoint_dir = pathlib.Path(checkpoint_dir)
     export = checkpoint_dir / "export.json"
-    normalization = checkpoint_dir / "assets" / ASSET_ID / "norm_stats.json"
+    asset_id = getattr(getattr(train_config.data, "assets", None), "asset_id", None) or ASSET_ID
+    normalization = checkpoint_dir / "assets" / asset_id / "norm_stats.json"
     return {
         **train_config.policy_metadata,
         "hanoi_dense": {

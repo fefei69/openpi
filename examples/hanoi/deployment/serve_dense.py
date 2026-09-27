@@ -20,6 +20,7 @@ import numpy as np
 DEFAULT_EXPORTS = {
     "pi05_hanoi_dense_aaaa_to_cccc": Path("checkpoints/pi05_hanoi_dense_aaaa_to_cccc/hanoi_dense_20260919/exports/29999"),
     "pi05_hanoi_dense_h16_aaaa_to_cccc": Path("checkpoints/pi05_hanoi_dense_h16_aaaa_to_cccc/hanoi_dense_h16_20260920/exports/29999"),
+    "pi05_hanoi_multitask_v6_cycle2": Path("checkpoints/pi05_hanoi_multitask_v6_cycle2/hanoi_multitask_20260926_cycle2/exports/15999"),
 }
 
 
@@ -34,12 +35,16 @@ class DensePolicy:
             raise ValueError(f"Policy must return {self.horizon} finite XYZ/jaw references")
         if not np.isin(actions[:, 3], (0, 1)).all():
             raise ValueError("Jaw intent must be thresholded to 0/1 by the checkpoint's output transform")
-        return {
+        reply = {
             "actions": actions,
             "reference_rate_hz": int(result.get("reference_rate_hz", 10)),
             "execution_prefix": int(result.get("execution_prefix", 3)),
             "policy_timing": dict(result.get("policy_timing", {})),
         }
+        for key in ("task", "task_direction"):  # six-task servers echo the task the prompt resolved to
+            if key in result:
+                reply[key] = result[key] if isinstance(result[key], str) else int(result[key])
+        return reply
 
 
 def warm_up(policy, prompt: str) -> float:
@@ -55,7 +60,8 @@ def warm_up(policy, prompt: str) -> float:
 
 @dataclasses.dataclass
 class Config:
-    # Trained variant: pi05_hanoi_dense_aaaa_to_cccc (30-step chunk) or pi05_hanoi_dense_h16_aaaa_to_cccc (16).
+    # Trained variant: pi05_hanoi_dense_aaaa_to_cccc (30-step chunk), pi05_hanoi_dense_h16_aaaa_to_cccc (16), or the
+    # six-task pi05_hanoi_multitask_v6_cycle2 (16-step, verbatim task prompt per request).
     config_name: str = "pi05_hanoi_dense_aaaa_to_cccc"
     checkpoint_dir: Path | None = None  # default: the variant's selected export
     host: str = "127.0.0.1"
@@ -81,14 +87,19 @@ def main(config: Config):
         sample_kwargs={"num_steps": config.num_steps},
     )
     metadata = dict(trained.metadata)
-    identity = metadata.get("hanoi_dense")
+    key = next((k for k in ("hanoi_dense", "hanoi_multitask") if isinstance(metadata.get(k), dict)), None)
+    identity = metadata.get(key) if key else None
     if not isinstance(identity, dict) or identity.get("export_sha256") is None:
-        raise RuntimeError("The checkpoint did not publish its hanoi_dense identity; check policy_config")
-    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind, "model": "pi05_dense"}
-    metadata["hanoi_dense"] = identity
+        raise RuntimeError("The checkpoint did not publish its hanoi_dense/hanoi_multitask identity; check policy_config")
+    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind,
+                "model": "pi05_multitask" if key == "hanoi_multitask" else "pi05_dense"}
+    metadata[key] = identity
     policy = DensePolicy(trained, int(identity["contract"]["action_horizon"]))
     logging.info("Export SHA-256 %s (step %s), %d-step chunks", identity["export_sha256"], identity.get("export_step"), policy.horizon)
-    logging.info("Warm-up inference took %.1f s", warm_up(policy, identity["prompt"]))
+    warm_prompt = identity.get("prompt") or (identity.get("prompts") or [None])[0]
+    logging.info("Warm-up inference took %.1f s", warm_up(policy, warm_prompt))
+    if identity.get("prompts"):
+        logging.info("Six-task server: every request must carry one of %d verbatim prompts", len(identity["prompts"]))
     logging.info("Serving pi0.5 dense Hanoi policy on ws://%s:%d", config.host, config.port)
     WebsocketPolicyServer(policy, host=config.host, port=config.port, metadata=metadata).serve_forever()
 

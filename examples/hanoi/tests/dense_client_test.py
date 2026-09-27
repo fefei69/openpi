@@ -105,7 +105,7 @@ def test_fast_references_are_stretched_then_refused():
 
 def metadata(horizon=30, prefix=3, config=None, **overrides):
     config = config or ("pi05_hanoi_dense_aaaa_to_cccc" if horizon == 30 else "pi05_hanoi_dense_h16_aaaa_to_cccc")
-    identity = {"contract": {**dense_client.EXPECTED_CONTRACT, "action_horizon": horizon, "execution_prefix": prefix, "recording": "r"},
+    identity = {"contract": {**dense_client.EXPECTED_CONTRACT, "version": 5, "action_horizon": horizon, "execution_prefix": prefix, "recording": "r"},
                 "prompt": dense_client.PROMPT, "config_name": config,
                 "export_sha256": dense_client.SELECTED_EXPORTS.get(config, "x"), "gpu": "test", "num_steps": 10}
     identity.update(overrides)
@@ -127,7 +127,7 @@ def test_contract_check():
         ex.plan(leg(n=16), observation_tick=0, now_tick=48, image_age_s=0.01, task="f")
     for bad, message in [({"a": 1}, "not a Hanoi dense"),
                          (metadata(horizon=8), "mismatch for action_horizon"),
-                         (metadata(contract={**dense_client.EXPECTED_CONTRACT, "internal_xyz_encoding": "relative"}), "mismatch for internal"),
+                         (metadata(contract={**dense_client.EXPECTED_CONTRACT, "version": 5, "action_horizon": 30, "execution_prefix": 3, "internal_xyz_encoding": "relative"}), "mismatch for internal"),
                          (metadata(prompt="x"), "prompt"),
                          (metadata(export_sha256="other"), "not the selected")]:
         with pytest.raises(ValueError, match=message):
@@ -181,3 +181,20 @@ def test_carry_rule_flags_sideways_travel_below_the_carry_height_only():
     low = carry_violation(diagonal, min_z_m=0.17)
     assert low is not None and 0.15 < low < 0.17
     assert carry_violation(diagonal, min_z_m=0.0) is None  # disabled
+
+
+def test_six_task_identity_resolves_the_requested_task_and_prompt():
+    prompts = [f"Move all four rings from peg {s} to peg {g} following Tower of Hanoi rules. The goal is peg {g}." for s, g in (("A", "C"), ("C", "A"))]
+    tasks = [{"index": 0, "direction": "AAAA_to_CCCC", "start_peg": "A", "goal_peg": "C", "prompt": prompts[0]},
+             {"index": 1, "direction": "CCCC_to_AAAA", "start_peg": "C", "goal_peg": "A", "prompt": prompts[1]}]
+    identity = {"contract": {**dense_client.EXPECTED_CONTRACT, "version": 6, "action_horizon": 16, "execution_prefix": 3, "tasks": tasks},
+                "prompts": prompts, "prompt": None, "config_name": "pi05_hanoi_multitask_v6_cycle2",
+                "export_sha256": dense_client.SELECTED_EXPORTS["pi05_hanoi_multitask_v6_cycle2"], "gpu": "test"}
+    r = dense_client.check_contract({"hanoi_multitask": identity}, expected_export_sha256="selected", task="CCCC_to_AAAA")
+    assert r["task"]["start_peg"] == "C" and r["task"]["goal_peg"] == "A" and r["task_prompt"] == prompts[1]
+    assert r["policy_family"] == "pi05_multitask" and r["multitask"] and r["action_horizon"] == 16
+    with pytest.raises(ValueError, match="not one of the server"):
+        dense_client.check_contract({"hanoi_multitask": identity}, expected_export_sha256="selected", task="AAAA_to_BBBB")
+    # A single-task identity still resolves to the fixed forward task with the trained prompt.
+    single = dense_client.check_contract(metadata(), expected_export_sha256="selected")
+    assert single["task"]["direction"] == "AAAA_to_CCCC" and single["task_prompt"] == dense_client.PROMPT and not single["multitask"]
