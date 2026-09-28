@@ -457,6 +457,11 @@ How it executes, and how it differs from the waypoint clients:
   slower still (90 brakes in 134 segments, median speed 7 mm/s). Re-planning that run's chunks with 9-row segments
   gives no brakes at a mean 27 mm/s; grasp poses still come from slot 1 to 2 of a fresh chunk because the prefix is
   cut at every jaw change.
+- Which rows of a chunk to execute is decided by the arm's position along the chunk, not by the clock. The rows
+  already due by the clock were skipped at first, and with Cosmos's 0.5 s inference that skipped a whole lift and
+  turned lift-then-travel into a diagonal, which the carry rule stopped (six-task run 1, 2026-09-28). Now the executor
+  starts from the row the arm has reached, searched only up to two rows past the clock's estimate, and never runs a
+  segment faster than the demonstration's row pace to catch up. `start_row` on each command event records it.
 - Limits: the recorder's velocity and acceleration limits with a 10% margin (0.16 m/s, 0.30 m/s²) and a tracking
   jerk bound of 20 m/s³ instead of the recorder's 1.3, which was chosen for whole 2 s legs; stitching short segments
   from rows with 0.7 mm noise needs the larger bound. A segment over the limits is slowed down (up to

@@ -145,6 +145,11 @@ class DenseExecutor:
     # How the segment's end velocity and acceleration are read off the chunk rows (see end_derivatives).
     estimator: str = "fit5"
     last_stretch: float = 1.0
+    # First chunk row executed by the last plan, and how many rows the clock alone would have skipped.
+    last_start_row: int = 0
+    last_elapsed_rows: int = 0
+    # A row within this distance of the commanded position counts as reached.
+    reached_m: float = 0.003
     # Set when the references could not be followed within the limits and the executor chose to
     # brake to rest instead; the next chunk is then predicted from a stopped arm.
     last_braked: bool = False
@@ -166,12 +171,21 @@ class DenseExecutor:
         actions = np.asarray(actions, dtype=float)
         if actions.shape != (self.horizon, 4) or not np.isfinite(actions).all():
             raise ValueError(f"Expected {self.horizon} finite absolute XYZ/jaw references")
-        # Row k is due at observation_tick + ROW_TICKS * (k + 1); skip the rows already due.
+        # Row k is due at observation_tick + ROW_TICKS * (k + 1). The clock says how many rows are due, but
+        # the arm may be behind that timeline (inference latency, slowed segments), and skipping rows it
+        # has not executed turns a lift-then-travel into a diagonal. So start from the row the arm has
+        # actually reached along the chunk, searched only up to slightly past the clock's estimate so a
+        # path that revisits a point cannot jump ahead.
         elapsed_rows = (tick - observation_tick) // ROW_TICKS
         if elapsed_rows >= self.horizon:
             raise ValueError("Prediction is expired; obtain a fresh observation")
         self.task = task
-        future = actions[elapsed_rows:]
+        limit = min(self.horizon - 1, elapsed_rows + 2)
+        distances = np.linalg.norm(actions[: limit + 1, :3] - self.position, axis=1)
+        nearest = int(distances.argmin())
+        start = min(nearest + 1, self.horizon - 1) if distances[nearest] <= self.reached_m else nearest
+        self.last_start_row, self.last_elapsed_rows = start, elapsed_rows
+        future = actions[start:]
         jaw_open = bool(future[0, 3] >= 0.5)
         if jaw_open != self.jaw_open:
             target = future[0, :3]
@@ -208,7 +222,7 @@ class DenseExecutor:
                 return self._brake(tick)
         end_velocity, end_acceleration = end_derivatives(future[:, :3], end, self.position, self.estimator)
         try:
-            return self._segment(target, end_velocity, end_acceleration, tick, self._due_ticks(observation_tick, elapsed_rows + len(prefix), tick))
+            return self._segment(target, end_velocity, end_acceleration, tick, self._due_ticks(observation_tick, start + len(prefix), tick, len(prefix)))
         except ValueError:
             return self._brake(tick)
 
@@ -230,9 +244,10 @@ class DenseExecutor:
         return command
 
     @staticmethod
-    def _due_ticks(observation_tick: int, rows_done: int, tick: int) -> int:
-        """Ticks until the last executed row is due, so the arm keeps the reference timeline."""
-        return max(ROW_TICKS, observation_tick + ROW_TICKS * rows_done - tick)
+    def _due_ticks(observation_tick: int, rows_done: int, tick: int, rows: int = 1) -> int:
+        """Ticks until the last executed row is due, but never faster than the demonstration's row pace:
+        an arm behind the timeline follows the path at normal speed rather than sprinting to catch up."""
+        return max(ROW_TICKS * rows, observation_tick + ROW_TICKS * rows_done - tick)
 
     def _stop_ticks(self, distance_m: float) -> int:
         braking = 2 * float(np.linalg.norm(self.velocity)) / LIMITS[1]

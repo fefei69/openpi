@@ -38,7 +38,7 @@ def test_segments_track_a_recorded_leg_with_continuous_velocity_and_skip_elapsed
     cmd = ex.plan(leg(), observation_tick=0, now_tick=0, image_age_s=0.01, task="f")
     assert cmd.kind == "cartesian" and ex.last_stretch <= 1.6  # leg start from rest, near the jerk limit
     validate_trajectory(cmd, START - 1, START + 1, dense_execution.TRACK_LIMITS)
-    np.testing.assert_allclose(ex.position, leg()[2, :3], atol=1e-9)
+    np.testing.assert_allclose(ex.position, leg()[3, :3], atol=1e-9)  # row 0 is 0.2 mm away, so rows 1..3 execute
     # Mid-leg (cruise): the segment is exactly three rows, and starts with the previous end velocity.
     p, v, a = leg_state((0.15, 0, 0), 1.94, 0.9)
     ex = DenseExecutor(p.copy(), velocity=v.copy(), acceleration=a.copy(), prefix=3)
@@ -166,7 +166,7 @@ def test_default_nine_row_segments_follow_a_leg_without_braking():
     assert ex.prefix == 9
     cmd = ex.plan(leg(), observation_tick=0, now_tick=0, image_age_s=0.01, task="f")
     assert cmd.kind == "cartesian" and not ex.last_braked and cmd.ticks >= 27
-    np.testing.assert_allclose(ex.position, leg()[8, :3], atol=1e-9)
+    np.testing.assert_allclose(ex.position, leg()[9, :3], atol=1e-9)  # row 0 counts as reached at rest
     validate_trajectory(cmd, START - 1, START + 1, dense_execution.TRACK_LIMITS)
 
 
@@ -198,3 +198,25 @@ def test_six_task_identity_resolves_the_requested_task_and_prompt():
     # A single-task identity still resolves to the fixed forward task with the trained prompt.
     single = dense_client.check_contract(metadata(), expected_export_sha256="selected")
     assert single["task"]["direction"] == "AAAA_to_CCCC" and single["task_prompt"] == dense_client.PROMPT and not single["multitask"]
+
+
+def test_rows_are_skipped_by_position_not_by_the_clock():
+    """A stale chunk that lifts then travels: an arm still at the grasp height must lift first, not cut the corner."""
+    grasp = np.array([0.4988, 0.0146, 0.150])
+    rows = np.zeros((16, 4)); rows[:, 3] = 0.0
+    lift_z = np.linspace(0.174, 0.192, 8)
+    for k in range(8):
+        rows[k, :3] = [0.4988, 0.0146, lift_z[k]]
+    for k in range(8, 16):
+        rows[k, :3] = [0.4988, 0.0146 - 0.007 * (k - 7), 0.192]
+    ex = DenseExecutor(grasp.copy(), jaw_open=False, prefix=9, horizon=16)
+    # Observed 8 rows ago (0.8 s, a Cosmos-sized latency plus one segment), so the clock alone would skip the lift.
+    cmd = ex.plan(rows, observation_tick=0, now_tick=24, image_age_s=0.01, task="f")
+    assert ex.last_elapsed_rows == 8 and ex.last_start_row == 0
+    assert cmd.kind == "cartesian" and dense_execution.carry_violation(cmd, min_z_m=0.17) is None
+    np.testing.assert_allclose(ex.position, rows[8, :3], atol=1e-9)  # the lift plus the first travel row
+    assert cmd.ticks >= 9 * 3  # no catch-up sprint: at least the demonstration's row pace
+    # Once the arm has reached row 5 of the lift, planning continues from row 6.
+    ex = DenseExecutor(rows[5, :3].copy(), jaw_open=False, prefix=9, horizon=16)
+    ex.plan(rows, observation_tick=0, now_tick=24, image_age_s=0.01, task="f")
+    assert ex.last_start_row == 6

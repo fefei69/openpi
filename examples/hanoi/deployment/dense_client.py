@@ -549,7 +549,7 @@ def main(config: Config):
             else:
                 counts["holds"] += 1
             log("command", request_id=source.request_id, observation_tick=source.observation.tick,
-                elapsed_rows=(tick - source.observation.tick) // ROW_TICKS, tick=tick, kind=command.kind,
+                elapsed_rows=(tick - source.observation.tick) // ROW_TICKS, start_row=proposed_executor.last_start_row, tick=tick, kind=command.kind,
                 ticks=command.ticks, duration_s=command.ticks / RATE_HZ, motion=live,
                 target_xyz_m=buffer.executor.position.tolist(), end_velocity_m_s=buffer.executor.velocity.tolist(),
                 stretch=proposed_executor.last_stretch if command.kind == "cartesian" else None,
