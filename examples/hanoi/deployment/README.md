@@ -507,6 +507,12 @@ A's), and tracks progress from that start peg to that goal peg. Set the board up
 folder name and the trial report carry the task. The start hovers were measured on the September 15 recording; the
 new recordings' peg A column sits about 1.7 mm further out, which the dense model absorbs on its first chunk.
 
+Cosmos six-task server: `serve_dense --multitask` in the Cosmos checkout serves `hanoi_cosmos_multitask_20260926_video_init`
+export `iter_000032000.pt` (the selected cycle-1 export: test slot-1 0.80 mm, language probe 97%; the cycle-2 export
+`iter_000022000.pt` is registered too, pass `--checkpoint`) under the same `hanoi_multitask` identity, with config name
+`cosmos_hanoi_multitask_v6_h16` and execution prefix 8, so the client is driven exactly as for the pi0.5 six-task server
+with `--server ws://127.0.0.1:8001` added. The six prompts are identical between the two models.
+
 Task progress and trials: [progress.py](progress.py) follows the ring stacks from the gripper events (standard start
 A = [4, 3, 2, 1]) and reports moves made and their legality, the optimal prefix (leading moves matching the 15-move
 solution), the fewest moves remaining from the final board (breadth-first search over the 81 boards) and

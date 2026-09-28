@@ -67,6 +67,9 @@ SELECTED_EXPORTS = {
     "cosmos_hanoi_dense_v5_h16": "ab1a1ccfa5675c7ee49102e043a14141810994f54a44ff8f9368389632c301b7",
     # pi0.5 six-task contract six, cycle 2, export 15999: 16-step chunk, prefix 3, verbatim task prompt required.
     "pi05_hanoi_multitask_v6_cycle2": "405106fdbd4338e4dc0b801b576988e7df8aa7cd3dd0cb8f8f4d372b6b1aba4a",
+    # Cosmos six-task contract six (weights file SHA-256): cycle 1 iter 32000 (selected), cycle 2 iter 22000 (in-progress export).
+    "cosmos_hanoi_multitask_v6_h16": "6521a05937ee906384ec7afe677212ab429516cc10f4944c0d8c72921624cca0",
+    "cosmos_hanoi_multitask_v6_h16_cycle2": "5bca94e1f6948ff0bd1d0989673f04d620e1343388e7cfb7e6b6c8af467fb53c",
 }
 SELECTED_EXPORT_SHA256 = SELECTED_EXPORTS["pi05_hanoi_dense_aaaa_to_cccc"]
 ALLOWED_HORIZONS = (30, 16)
