@@ -72,3 +72,20 @@ def test_peak_progress_survives_a_later_illegal_stacking():
 
 def test_peak_progress_of_an_untouched_board_is_zero():
     assert progress.BoardTracker("C", "A").report()["peak_progress"] == 0.0
+
+
+def test_every_move_is_classed_and_counted():
+    t = progress.BoardTracker("A", "C")
+    for ring, src, dst in t.optimal[:2]:
+        t.grasp(src); t.release(dst)
+    t.grasp("B"); assert t.release("B")["kind"] == "null"         # ring 1 put back
+    t.grasp("B"); assert t.release("A")["kind"] == "detour"       # ring 1 onto ring 3: legal, off the shortest path
+    t.grasp("C"); assert t.release("A")["kind"] == "illegal"      # ring 2 onto ring 1
+    t.grasp("B"); assert t.release("C")["kind"] == "empty"        # closed on an empty peg
+    r = t.report()
+    assert r["move_counts"] == {"optimal": 2, "detour": 1, "null": 1, "illegal": 1, "empty": 1}
+    assert not r["clean"] and r["optimal_prefix"] == 2
+    t2 = progress.BoardTracker("C", "B")
+    for ring, src, dst in t2.optimal:
+        t2.grasp(src); t2.release(dst)
+    assert t2.report()["clean"] and t2.report()["move_counts"]["optimal"] == 15

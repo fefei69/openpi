@@ -4,7 +4,8 @@ Selects runs under ``data/hanoi/deployment`` by ``--tag`` (the client's ``--tag`
 (``cosmos_dense``, ``pi05_dense``), ``--config`` and/or ``--since``, or takes run directories directly,
 and writes ``exp_vid/<name>/trials.md`` and ``trials.csv`` in the family's checkout. Per trial:
 
-* moves completed and how many were legal, the optimal prefix (leading moves matching the 15-move solution),
+* moves completed, how many were optimal / detours / null / illegal, the optimal prefix (leading moves matching
+  the 15-move solution),
 * remaining moves to the goal from the final board and ``progress = (15 - remaining) / 15``, and the peak
   progress over the run (the final board is unscorable after an illegal stacking),
 * solved or not, solve time, how the run ended and why, brakes, tracking error.
@@ -56,7 +57,8 @@ def trial_row(run: Path) -> dict:
         "tag": summary.get("tag", ""), "family": summary.get("policy_family"), "config": summary.get("config_name"),
         "task": summary.get("task_direction") or "AAAA_to_CCCC",
         "status": summary.get("status"), "aborted": commands == 0, "commands": commands,
-        "moves": r["moves_completed"], "legal": r["legal_moves"],
+        "moves": r["moves_completed"], "legal": r["legal_moves"], **{k: r["move_counts"][k] for k in ("optimal", "detour", "null", "illegal")},
+        "clean": r["clean"],
         "optimal_prefix": r["optimal_prefix"], "remaining": r["remaining_moves"], "progress": r["progress"],
         "peak_progress": r["peak_progress"],
         "solved": r["solved"], "solve_time_s": None if solved_t is None else round(solved_t, 1),
@@ -116,13 +118,14 @@ def main():
              f"mean optimal prefix {np.mean([r['optimal_prefix'] for r in trials]) if trials else float('nan'):.1f} moves; "
              f"median moves {np.median([r['moves'] for r in trials]) if trials else float('nan'):.0f}; "
              f"solve time {np.mean([r['solve_time_s'] for r in trials if r['solve_time_s']]) if solved else float('nan'):.0f} s mean over solved runs", "",
-             "| # | run | task | status | moves (legal) | optimal prefix | remaining | progress | peak | solve time | brakes | tracking p95 | reason |",
+             "| # | run | task | status | moves (optimal / detour / null / illegal) | optimal prefix | remaining | progress | peak | solve time | brakes | tracking p95 | reason |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for k, r in enumerate(rows, 1):
         pct = f"{100 * r['progress']:.0f}%" if r['progress'] is not None else ""
         peak_pct = f"{100 * r['peak_progress']:.0f}%" if r['peak_progress'] is not None else ""
         status = "aborted" if r["aborted"] else r["status"]
-        lines.append(f"| {k} | {r['run']} | {r['task']} | {status} | {r['moves']} ({r['legal']}) | {r['optimal_prefix']} | {r['remaining']} | {pct} | {peak_pct} | "
+        kinds = f"{r['moves']} ({r['optimal']} / {r['detour']} / {r['null']} / {r['illegal']})"
+        lines.append(f"| {k} | {r['run']} | {r['task']} | {status} | {kinds} | {r['optimal_prefix']} | {r['remaining']} | {pct} | {peak_pct} | "
                      f"{r['solve_time_s'] or ''} | {r['brakes']} | {r['tracking_p95_mm']} | {r['reason']} |")
     text = "\n".join(lines) + "\n"
     (dest / "trials.md").write_text(text)

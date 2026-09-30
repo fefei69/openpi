@@ -136,6 +136,9 @@ class Config:
     finish_grace_s: float = 30.0
     # Free-text label for a series of trials; recorded in config.json and summary.json for the trial report.
     tag: str = ""
+    # After a six-task run, regenerate exp_vid/six_task_scoreboard.md (success rate, progress, move quality per task
+    # per policy) in both checkouts from every recorded run.
+    update_scoreboard: bool = True
     # Track the ring stacks from the gripper events and end the run once the board reaches the goal.
     stop_when_solved: bool = True
     # Record a ROS 2 bag of the full-frame camera stream for the whole run, from robot initialization
@@ -678,6 +681,14 @@ def main(config: Config):
         if isinstance(alignment, dict):
             summary["initial_proprio_alignment"] = alignment
         (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+        if config.update_scoreboard and (summary.get("policy_family") or "").endswith("multitask"):
+            try:
+                from examples.hanoi.deployment import scoreboard
+
+                for path in scoreboard.update(after=output.name):
+                    logging.info("Scoreboard updated: %s", path)
+            except Exception as exc:  # never let the scoreboard fail a run
+                log("scoreboard_failed", error=repr(exc))
         events.close()
         signal.signal(signal.SIGINT, previous_sigint)
         logging.info("Result: %s", summary)

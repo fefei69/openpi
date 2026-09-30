@@ -531,7 +531,17 @@ family's checkout with one row per trial (moves, optimal prefix, remaining, fina
 ended, brakes, tracking) and the aggregate. Peak progress is the best board reached, which still scores a run whose
 final board is unscorable after an illegal stacking; runs that aborted before the policy commanded anything (no camera,
 server down) are listed but left out of the aggregate; `run_publish_run.sh` also prints the progress line in each run's README and
-takes `--video-end-s` to cut the camera video.
+takes `--video-end-s` to cut the camera video. Every move is classed as optimal (on a shortest path to the goal), a detour
+(legal but off it), null (put back on the same peg) or illegal (a larger ring onto a smaller one), and the counts appear in
+the summary (`move_counts`, `clean`), the trial report and the scoreboard.
+
+Six-task scoreboard: every six-task run (Cosmos or pi0.5) ends by regenerating `exp_vid/six_task_scoreboard.md` (and
+`six_task_trials.csv`) in both checkouts from all recorded runs, via [scoreboard.py](scoreboard.py): trials done against the
+campaign target of 3 per task per policy (36 runs), solved count and success rate, mean progress (a trial whose final board is
+unscorable after an illegal stacking counts its peak, marked `*`), the move-quality counts and clean trials per case, what is
+still to run, and the per-trial rows. Aborted runs are listed but not counted. `./run_scoreboard.sh` rebuilds it by hand
+(`--since`, `--exclude <run>`, `--target`); `--no-update-scoreboard` on the client skips it; move a run folder out of
+`data/hanoi/deployment` to drop it for good.
 
 Camera recording: `--record-bag` on either client starts `ros2 bag record` of the full-frame camera stream and its
 camera_info into `<run>/camera_bag` (mcap, zstd_fast by default) for the whole run, robot initialization through the

@@ -3,7 +3,9 @@
 Progress is not binary. From the sequence of grasps (jaw closes) and releases (jaw opens) at each
 peg, ``BoardTracker`` follows the ring stacks from the standard start A = [4, 3, 2, 1] and reports:
 
-* ``moves``: every ring move made, with its legality;
+* ``moves``: every ring move made, with its legality and kind (``optimal`` = on a shortest path to the goal,
+  ``detour`` = legal but off it, ``null`` = put back on the same peg, ``illegal`` = a larger ring onto a
+  smaller one, ``empty`` = closed on nothing), and ``move_counts`` per kind;
 * ``optimal_prefix``: how many leading moves match the optimal 15-move solution;
 * ``remaining``: the fewest legal moves from the current board to the goal (breadth-first search over
   the 81 board states), so ``progress = (15 - remaining) / 15`` credits any legal path, and null
@@ -30,6 +32,9 @@ def all_on(peg: str) -> dict:
 START = all_on("A")
 GOAL = all_on("C")
 LEVELS_MM = np.array([57.1, 67.8, 77.5, 87.7])
+# How each ring move is classed: on a shortest path to the goal, legal but off it, put back on the same peg,
+# a larger ring onto a smaller one, or a close-and-open that held nothing.
+MOVE_KINDS = ("optimal", "detour", "null", "illegal", "empty")
 
 
 def peg_of(y_m: float) -> str:
@@ -118,9 +123,21 @@ class BoardTracker:
     def release(self, peg: str, t_s: float | None = None) -> dict:
         ring, src = self.held if self.held else (None, None)
         legal = ring is not None and (not self.stacks[peg] or self.stacks[peg][-1] > ring)
+        before = remaining_moves(self._with_held_back(), self.goal_peg)
         if ring is not None:
             self.stacks[peg].append(ring)
-        move = {"t_s": t_s, "ring": ring, "from": src, "to": peg, "legal": legal,
+        after = remaining_moves(self.stacks, self.goal_peg)
+        if ring is None:
+            kind = "empty"  # closed on nothing, then opened: not a ring move
+        elif not legal:
+            kind = "illegal"
+        elif src == peg:
+            kind = "null"
+        elif before is not None and after is not None and after == before - 1:
+            kind = "optimal"
+        else:
+            kind = "detour"  # legal, but not on a shortest path to the goal
+        move = {"t_s": t_s, "ring": ring, "from": src, "to": peg, "legal": legal, "kind": kind,
                 "board": {p: list(v) for p, v in self.stacks.items()}}
         self.moves.append(move)
         self.held = None
@@ -161,6 +178,8 @@ class BoardTracker:
             "legal_moves": sum(1 for m in self.moves if m["legal"]),
             "all_legal": all(m["legal"] for m in self.moves),
             "optimal_prefix": self.optimal_prefix,
+            "move_counts": {k: sum(1 for m in self.moves if m["kind"] == k) for k in MOVE_KINDS},
+            "clean": bool(self.moves) and all(m["kind"] == "optimal" for m in self.moves),
             "remaining_moves": remaining,
             "progress": None if remaining is None else round((total - remaining) / total, 3),
             "peak_progress": None if peak is None else round((total - peak) / total, 3),
