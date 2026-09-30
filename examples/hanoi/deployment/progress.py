@@ -8,6 +8,8 @@ peg, ``BoardTracker`` follows the ring stacks from the standard start A = [4, 3,
 * ``remaining``: the fewest legal moves from the current board to the goal (breadth-first search over
   the 81 board states), so ``progress = (15 - remaining) / 15`` credits any legal path, and null
   moves or detours cost exactly what they cost;
+* ``peak_progress``: the best ``progress`` over the boards reached, so a run that later stacks a ring
+  illegally (an unscorable board, ``progress`` None) still gets credit for how far it got;
 * ``solved``: the board is C = [4, 3, 2, 1].
 
 The same tracker runs live in the dense client (to stop a trial when the puzzle is solved) and
@@ -147,6 +149,11 @@ class BoardTracker:
     def report(self) -> dict:
         remaining = None if self.uncertain else remaining_moves(self.stacks if self.held is None else self._with_held_back(), self.goal_peg)
         total = len(self.optimal)
+        # Best board reached along the way: an illegal stacking later on makes the final board unscorable,
+        # but the run still got as far as it got.
+        boards = [all_on(self.start_peg)] + [m["board"] for m in self.moves]
+        scored = [remaining_moves(b, self.goal_peg) for b in boards]
+        peak = min((r for r in scored if r is not None), default=None)
         return {
             "start_peg": self.start_peg,
             "goal_peg": self.goal_peg,
@@ -156,6 +163,7 @@ class BoardTracker:
             "optimal_prefix": self.optimal_prefix,
             "remaining_moves": remaining,
             "progress": None if remaining is None else round((total - remaining) / total, 3),
+            "peak_progress": None if peak is None else round((total - peak) / total, 3),
             "solved": self.solved,
             "board_uncertain": self.uncertain,
             "final_board": {p: list(v) for p, v in self.stacks.items()},

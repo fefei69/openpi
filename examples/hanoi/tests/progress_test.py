@@ -52,3 +52,23 @@ def test_tracker_handles_other_directions():
     r = t.report()
     assert r["solved"] and r["progress"] == 1.0 and r["start_peg"] == "C" and r["goal_peg"] == "A"
     assert progress.remaining_moves(progress.all_on("B"), "C") == 15 and progress.remaining_moves(progress.all_on("C"), "C") == 0
+
+
+def test_peak_progress_survives_a_later_illegal_stacking():
+    t = progress.BoardTracker("A", "C")
+    for ring, src, dst in t.optimal[:12]:
+        t.grasp(src)
+        t.release(dst)
+    r = t.report()
+    assert r["progress"] == r["peak_progress"] == 0.8 and r["remaining_moves"] == 3
+    t.grasp("A")
+    t.release("C")  # ring 1 onto ring 3: legal but off the optimal path
+    t.grasp("A")
+    t.release("C")  # ring 2 onto ring 1: illegal, the board is no longer a Hanoi state
+    r = t.report()
+    assert r["progress"] is None and r["remaining_moves"] is None and not r["all_legal"]
+    assert r["peak_progress"] == 0.8
+
+
+def test_peak_progress_of_an_untouched_board_is_zero():
+    assert progress.BoardTracker("C", "A").report()["peak_progress"] == 0.0

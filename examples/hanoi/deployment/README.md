@@ -527,8 +527,10 @@ The dense client runs the tracker live: every grasp and release is logged (`gras
 `--stop-when-solved` (default) the run ends and homes as soon as the board reaches the goal. A missed grasp right
 after a close leaves the ring on its peg; a slip during a carry marks the board uncertain. `--tag <name>` labels a
 series of trials, and `run_trial_report.sh --tag <name>` writes `exp_vid/<name>/trials.md` and `trials.csv` in the
-family's checkout with one row per trial (moves, optimal prefix, remaining, progress, solve time, how it ended,
-brakes, tracking) and the aggregate; `run_publish_run.sh` also prints the progress line in each run's README and
+family's checkout with one row per trial (moves, optimal prefix, remaining, final and peak progress, solve time, how it
+ended, brakes, tracking) and the aggregate. Peak progress is the best board reached, which still scores a run whose
+final board is unscorable after an illegal stacking; runs that aborted before the policy commanded anything (no camera,
+server down) are listed but left out of the aggregate; `run_publish_run.sh` also prints the progress line in each run's README and
 takes `--video-end-s` to cut the camera video.
 
 Camera recording: `--record-bag` on either client starts `ros2 bag record` of the full-frame camera stream and its
