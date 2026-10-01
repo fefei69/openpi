@@ -53,3 +53,19 @@ def test_scoreboard_counts_trials_per_task_and_policy_and_skips_aborted_runs(tmp
     written = scoreboard.update(after="dense_live_4", runs_dir=runs, dests=[dest])
     assert written == [dest / "six_task_scoreboard.md"] and (dest / "six_task_trials.csv").exists()
     assert (dest / "six_task_scoreboard.md").read_text().splitlines()[3:] == text.splitlines()[3:]  # same but for the time stamp
+
+
+def test_average_progress_keeps_the_best_trials_per_task():
+    def row(family, task, progress, peak=None, aborted=False):
+        return {"family": family, "task": task, "progress": progress, "peak_progress": progress if peak is None else peak, "aborted": aborted}
+    rows = [row("cosmos_multitask", "AAAA_to_CCCC", x) for x in (1.0, 0.6, 0.6, 1.0, 1.0)]         # five trials: keep the best three
+    rows += [row("cosmos_multitask", "CCCC_to_AAAA", x) for x in (0.2, 0.8)]                         # two trials: keep both
+    rows += [row("cosmos_multitask", "CCCC_to_AAAA", 0.0, aborted=True)]                             # never counted
+    rows += [row("pi05_multitask", "AAAA_to_CCCC", None, peak=0.8), row("pi05_multitask", "AAAA_to_CCCC", 0.0, peak=0.4)]
+    picked = scoreboard.best_trials(rows, "cosmos_multitask", best=3)
+    assert picked["AAAA_to_CCCC"] == [1.0, 1.0, 1.0] and picked["CCCC_to_AAAA"] == [0.8, 0.2] and picked["AAAA_to_BBBB"] == []
+    assert scoreboard.average_progress(rows, "cosmos_multitask", best=3) == 0.75     # mean of the task means 1.0 and 0.5
+    # An unscorable final board counts its peak; a scorable one counts where it ended.
+    assert scoreboard.best_trials(rows, "pi05_multitask")["AAAA_to_CCCC"] == [0.8, 0.0]
+    assert scoreboard.average_progress(rows, "pi05_multitask") == 0.4
+    assert scoreboard.average_progress(rows, "nothing_yet") is None

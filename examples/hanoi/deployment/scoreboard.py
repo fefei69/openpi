@@ -48,6 +48,21 @@ def trial_progress(r: dict) -> float | None:
     return r["progress"] if r["progress"] is not None else r["peak_progress"]
 
 
+def best_trials(rows: list[dict], family: str, best: int = TARGET) -> dict:
+    """Per task, the progress of a policy's ``best`` highest-scoring counted trials (all of them when it has no more)."""
+    picked = {}
+    for task in TASKS:
+        scores = [trial_progress(r) for r in rows if r["family"] == family and r["task"] == task and not r["aborted"]]
+        picked[task] = sorted((x for x in scores if x is not None), reverse=True)[:best]
+    return picked
+
+
+def average_progress(rows: list[dict], family: str, best: int = TARGET) -> float | None:
+    """Mean over the tasks tried of each task's mean progress over its best trials."""
+    means = [float(np.mean(v)) for v in best_trials(rows, family, best).values() if v]
+    return float(np.mean(means)) if means else None
+
+
 def pct(x) -> str:
     return "" if x is None else f"{100 * x:.0f}%"
 
