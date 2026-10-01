@@ -220,3 +220,46 @@ def test_rows_are_skipped_by_position_not_by_the_clock():
     ex = DenseExecutor(rows[5, :3].copy(), jaw_open=False, prefix=9, horizon=16)
     ex.plan(rows, observation_tick=0, now_tick=24, image_age_s=0.01, task="f")
     assert ex.last_start_row == 6
+
+
+def play_metadata(**overrides):
+    import itertools
+
+    from examples.hanoi.deployment import progress
+
+    boards = ["".join(b) for b in itertools.product("ABC", repeat=4)]
+    identity = {"contract": {**dense_client.EXPECTED_CONTRACT, "version": 7, "action_horizon": 16, "execution_prefix": 8},
+                "prompts": {b: progress.goal_sentence(b) for b in boards}, "prompt": None, "model": "cosmos_play",
+                "config_name": "cosmos_hanoi_play_k5_h16", "export_sha256": dense_client.SELECTED_EXPORTS["cosmos_hanoi_play_k5_h16"]}
+    identity.update(overrides)
+    return {"hanoi_play": identity, "cosmos_hanoi": {}}
+
+
+def test_play_identity_resolves_a_goal_board_and_its_sentence():
+    r = dense_client.check_contract(play_metadata(), expected_export_sha256="selected", task="AAAA_to_CCCC", distance=3)
+    assert r["play"] and not r["multitask"] and r["policy_family"] == "cosmos_play" and r["execution_prefix"] == 8
+    assert (r["task"]["goal_board"], r["task"]["start_board"], r["task"]["distance"], r["task"]["start_peg"]) == ("CCAA", "AAAA", 3, "A")
+    assert r["task_prompt"] == "Goal: peg A holds rings 3 and 4, peg B is empty, peg C holds rings 1 and 2."
+    full = dense_client.check_contract(play_metadata(), expected_export_sha256="selected", task="CCCC_to_BBBB")
+    assert full["task"]["goal_board"] == "BBBB" and full["task_prompt"] == full["board_prompts"]["BBBB"]
+    with pytest.raises(ValueError, match="Distance must be"):
+        dense_client.check_contract(play_metadata(), expected_export_sha256="selected", task="AAAA_to_CCCC", distance=16)
+    with pytest.raises(ValueError, match="Unknown task"):
+        dense_client.check_contract(play_metadata(), expected_export_sha256="selected", task="AAAA_to_AAAA")
+    wrong = play_metadata()
+    wrong["hanoi_play"]["prompts"]["CCAA"] = "Goal: peg C holds rings 1 and 2."
+    with pytest.raises(ValueError, match="sentences differ"):
+        dense_client.check_contract(wrong, expected_export_sha256="selected", task="AAAA_to_CCCC")
+    with pytest.raises(ValueError, match="selected checkpoint"):
+        dense_client.check_contract(play_metadata(export_sha256="0" * 64), expected_export_sha256="selected", task="AAAA_to_CCCC")
+    # Intermediate goals exist only for play servers.
+    with pytest.raises(ValueError, match="play-trained server"):
+        dense_client.check_contract(metadata(), expected_export_sha256="selected", distance=3)
+
+
+def test_arm_protocol_stops_release_and_home():
+    from examples.hanoi.deployment.cosmos_client import stop_actions
+
+    for status in ("task_solved", "illegal_move", "budget_spent", "stalled"):
+        assert stop_actions(status, live=True, return_home_after_duration=True) == (True, True)
+        assert stop_actions(status, live=False, return_home_after_duration=True) == (False, False)

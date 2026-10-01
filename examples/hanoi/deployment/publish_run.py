@@ -76,7 +76,7 @@ def main():
     family = summary.get("policy_family") or "unknown"
     cosmos = family.startswith("cosmos")
     dest = args.dest or ((COSMOS_ROOT if cosmos else OPENPI_ROOT) / "exp_vid")
-    moves = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C").report()
+    moves = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C", goal_board=summary.get("goal_board")).report()
     horizon = summary.get("action_horizon")
     variant = f"h{horizon}" if horizon else ((summary.get("config_name") or "").replace("pi05_hanoi_", "").replace("cosmos_hanoi_", "").replace("_aaaa_to_cccc", "") or "policy")
     status = "solved" if moves["solved"] else summary["status"]

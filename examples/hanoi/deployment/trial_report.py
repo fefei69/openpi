@@ -47,7 +47,7 @@ def failure_reason(summary: dict, events: list) -> str:
 def trial_row(run: Path) -> dict:
     summary = json.loads((run / "summary.json").read_text())
     events = [json.loads(l) for l in (run / "events.jsonl").read_text().splitlines()]
-    r = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C").report()
+    r = reconstruct(events, summary.get("start_peg") or "A", summary.get("goal_peg") or "C", goal_board=summary.get("goal_board")).report()
     solved_t = next((e["monotonic_s"] - events[0]["monotonic_s"] for e in events if e["event"] == "task_solved"), None)
     if solved_t is None and r["solved"] and r["moves"]:
         solved_t = r["moves"][-1]["t_s"]
@@ -56,6 +56,8 @@ def trial_row(run: Path) -> dict:
         "run": run.name, "date": datetime.datetime.fromtimestamp(run.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
         "tag": summary.get("tag", ""), "family": summary.get("policy_family"), "config": summary.get("config_name"),
         "task": summary.get("task_direction") or "AAAA_to_CCCC",
+        "goal_board": r["goal_board"], "distance": r["distance"], "goal_protocol": summary.get("goal_protocol") or "final",
+        "trial_rules": summary.get("trial_rules") or "duration", "first_error": r["moves_before_first_error"], "ring_moves": r["ring_moves"],
         "status": summary.get("status"), "aborted": commands == 0, "commands": commands,
         "moves": r["moves_completed"], "legal": r["legal_moves"], **{k: r["move_counts"][k] for k in ("optimal", "detour", "null", "illegal")},
         "clean": r["clean"],

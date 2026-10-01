@@ -89,3 +89,55 @@ def test_every_move_is_classed_and_counted():
     for ring, src, dst in t2.optimal:
         t2.grasp(src); t2.release(dst)
     assert t2.report()["clean"] and t2.report()["move_counts"]["optimal"] == 15
+
+
+# The arm protocol's table (docs/hanoi_play_arm_protocol.md in cosmos-policy): goal boards at distance 1, 3, 7, 15.
+PROTOCOL_GOALS = {
+    "AAAA_to_CCCC": ("BAAA", "CCAA", "BBBA", "CCCC"), "CCCC_to_AAAA": ("BCCC", "AACC", "BBBC", "AAAA"),
+    "AAAA_to_BBBB": ("CAAA", "BBAA", "CCCA", "BBBB"), "BBBB_to_AAAA": ("CBBB", "AABB", "CCCB", "AAAA"),
+    "BBBB_to_CCCC": ("ABBB", "CCBB", "AAAB", "CCCC"), "CCCC_to_BBBB": ("ACCC", "BBCC", "AAAC", "BBBB"),
+}
+PROTOCOL_PATH_A_TO_C = "AAAA BAAA BCAA CCAA CCBA ACBA ABBA BBBA BBBC CBBC CABC AABC AACC BACC BCCC CCCC".split()
+PROTOCOL_SENTENCES = {
+    "AAAA": "Goal: peg A holds rings 1, 2, 3 and 4, peg B is empty, peg C is empty.",
+    "CCCC": "Goal: peg A is empty, peg B is empty, peg C holds rings 1, 2, 3 and 4.",
+    "BAAA": "Goal: peg A holds rings 2, 3 and 4, peg B holds ring 1, peg C is empty.",
+    "CCAA": "Goal: peg A holds rings 3 and 4, peg B is empty, peg C holds rings 1 and 2.",
+    "BBBA": "Goal: peg A holds ring 4, peg B holds rings 1, 2 and 3, peg C is empty.",
+    "CCCA": "Goal: peg A holds ring 4, peg B is empty, peg C holds rings 1, 2 and 3.",
+}
+
+
+def test_boards_goals_and_sentences_match_the_arm_protocol():
+    import itertools
+
+    assert progress.stacks_from_board("BAAA") == {"A": [4, 3, 2], "B": [1], "C": []}
+    assert progress.board_string({"A": [4, 3, 2], "B": [1], "C": []}) == "BAAA"
+    assert progress.board_string({"A": [4, 3], "B": [1], "C": []}) is None  # a ring is in the gripper
+    for direction, goals in PROTOCOL_GOALS.items():
+        assert tuple(progress.goal_at_distance(direction, d) for d in (1, 3, 7, 15)) == goals
+    path = progress.shortest_path(progress.all_on("A"), "C")
+    assert [progress.board_string(b) for b in path] == PROTOCOL_PATH_A_TO_C
+    assert progress.path_moves(path) == progress.optimal_solution(4, "A", "C")
+    for board, sentence in PROTOCOL_SENTENCES.items():
+        assert progress.goal_sentence(board) == sentence
+    assert len({progress.goal_sentence("".join(b)) for b in itertools.product("ABC", repeat=4)}) == 81
+    assert progress.board_string(progress.next_board(progress.stacks_from_board("BCAA"), "CCCC")) == "CCAA"
+    assert progress.next_board(progress.all_on("C"), "CCCC") is None
+
+
+def test_tracker_scores_an_intermediate_goal_board():
+    t = progress.BoardTracker("A", "C", goal_board="CCAA")   # distance 3 on the way from A to C
+    assert t.total == 3 and t.optimal == progress.optimal_solution(4, "A", "C")[:3]
+    t.grasp("A"); assert t.release("C")["kind"] == "detour"   # ring 1 to C: still three moves away, no closer
+    r = t.report()
+    assert (r["goal_board"], r["start_board"], r["distance"], r["moves_before_first_error"], r["progress"]) == ("CCAA", "AAAA", 3, 0, 0.0)
+    t.grasp("C"); assert t.release("B")["kind"] == "optimal"
+    t.grasp("A"); assert t.release("C")["kind"] == "optimal"
+    t.grasp("B"); assert t.release("C")["kind"] == "optimal"
+    r = t.report()
+    assert t.solved and r["progress"] == 1.0 and r["ring_moves"] == 4 and r["moves_before_first_error"] == 0
+    clean = progress.BoardTracker("A", "B", goal_board="CCCA")
+    for ring, src, dst in clean.optimal:
+        clean.grasp(src); clean.release(dst)
+    assert clean.solved and clean.report()["moves_before_first_error"] == 7 and clean.report()["clean"]

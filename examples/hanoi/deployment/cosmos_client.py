@@ -294,8 +294,8 @@ def stop_actions(status: str, *, live: bool, return_home_after_duration: bool) -
         return True, True  # Nothing was dispatched; the arm rests at its last verified arrival.
     if status == "failed":
         return True, True  # An unexpected exception: open and home rather than hold a ring mid-carry.
-    if status == "task_solved":
-        return True, True
+    if status in ("task_solved", "illegal_move", "budget_spent", "stalled"):
+        return True, True  # Every way an arm-protocol trial ends: open (a held ring is released in place) and home.
     return False, False
 
 

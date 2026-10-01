@@ -55,6 +55,11 @@ from examples.hanoi.deployment.hardware import TrossenArm
 from examples.hanoi.deployment.hardware import check_grasp
 from examples.hanoi.deployment.hardware import validate_trajectory
 from examples.hanoi.deployment.progress import BoardTracker
+from examples.hanoi.deployment.progress import DIRECTIONS
+from examples.hanoi.deployment.progress import board_string
+from examples.hanoi.deployment.progress import goal_at_distance
+from examples.hanoi.deployment.progress import goal_sentence
+from examples.hanoi.deployment.progress import next_board
 from examples.hanoi.deployment.progress import peg_of
 
 PROMPT = hanoi.PROMPTS["aaaa_to_cccc"]
@@ -70,13 +75,19 @@ SELECTED_EXPORTS = {
     # Cosmos six-task contract six (weights file SHA-256): cycle 1 iter 32000 (selected), cycle 2 iter 22000 (in-progress export).
     "cosmos_hanoi_multitask_v6_h16": "6521a05937ee906384ec7afe677212ab429516cc10f4944c0d8c72921624cca0",
     "cosmos_hanoi_multitask_v6_h16_cycle2": "5bca94e1f6948ff0bd1d0989673f04d620e1343388e7cfb7e6b6c8af467fb53c",
+    # Cosmos play_k5 contract seven (weights file SHA-256), video init, iter 32000: goal board sentence required.
+    "cosmos_hanoi_play_k5_h16": "1544c36873db0c9f3fa40287133f3265e031ae40e8958c176c58e9e9ed4472c6",
 }
 SELECTED_EXPORT_SHA256 = SELECTED_EXPORTS["pi05_hanoi_dense_aaaa_to_cccc"]
 ALLOWED_HORIZONS = (30, 16)
 # Execution prefixes the trained contracts declare: 3 (pi0.5, 0.1 s inference) and 8 (Cosmos, 0.5 s).
 ALLOWED_PREFIXES = (3, 8)
-IDENTITY_KEYS = ("hanoi_dense", "hanoi_multitask")
-ALLOWED_VERSIONS = (5, 6)
+IDENTITY_KEYS = ("hanoi_dense", "hanoi_multitask", "hanoi_play")
+ALLOWED_VERSIONS = (5, 6, 7)
+# How a trial ended under the arm protocol's rules, for the log.
+END_MESSAGES = {"task_solved": "Goal board reached after %.0f s; returning home",
+                "illegal_move": "A ring was placed on a smaller one after %.0f s; ending the trial",
+                "budget_spent": "Move budget spent after %.0f s without reaching the goal; ending the trial"}
 EXPECTED_CONTRACT = {
     "robot": "trossen_wxai_single",
     "reference_rate_hz": RATE_HZ // ROW_TICKS,
@@ -131,13 +142,24 @@ class Config:
     start: Literal["auto", "episode_start", "above_peg_a", "above_peg_b", "above_peg_c"] = "auto"
     # Task for a six-task (contract six) server, by direction, e.g. CCCC_to_AAAA; ignored by single-task servers.
     task: str = "AAAA_to_CCCC"
+    # Play-trained (contract seven) servers take a goal board. The trial's goal is the board this many moves along the
+    # task's shortest path from its full tower: 15 is the full tower move, 1, 3 and 7 are the arm protocol's shorter goals.
+    distance: int = 15
+    # final: the goal board's sentence for the whole trial (protocol A, the comparison). next: after every move, the
+    # sentence of the next board on the shortest path from the tracked board to the goal (protocol C, diagnostic only).
+    goal_protocol: Literal["final", "next"] = "final"
+    # duration: run for --duration-s, ending early when solved. arm_protocol: end at the goal board, after twice the
+    # goal distance in moves, on a ring placed on a smaller one, a dropped ring, or --stall-s without a completed move;
+    # --duration-s is not used. auto: arm_protocol for a live run against a play server, duration otherwise.
+    trial_rules: Literal["auto", "duration", "arm_protocol"] = "auto"
+    stall_s: float = 60.0
     max_start_joint_error_rad: float = 0.05
     return_home_after_duration: bool = True
     finish_grace_s: float = 30.0
     # Free-text label for a series of trials; recorded in config.json and summary.json for the trial report.
     tag: str = ""
-    # After a six-task run, regenerate exp_vid/six_task_scoreboard.md (success rate, progress, move quality per task
-    # per policy) in both checkouts from every recorded run.
+    # After a six-task or play-policy run, regenerate exp_vid/six_task_scoreboard.md and exp_vid/play_scoreboard.md
+    # (success rate, progress, move quality per case per policy) in both checkouts from every recorded run.
     update_scoreboard: bool = True
     # Track the ring stacks from the gripper events and end the run once the board reaches the goal.
     stop_when_solved: bool = True
@@ -153,8 +175,8 @@ class Config:
 # ---- contract, transport ----
 
 
-def check_contract(metadata, *, expected_export_sha256: str | None = None, task: str = "AAAA_to_CCCC") -> dict:
-    """Validate a dense (contract five) or six-task (contract six) identity; returns it with the resolved task and prompt."""
+def check_contract(metadata, *, expected_export_sha256: str | None = None, task: str = "AAAA_to_CCCC", distance: int = 15) -> dict:
+    """Validate a dense (contract five), six-task (six) or play (seven) identity; returns it with the resolved task and prompt."""
     identity = identity_key = None
     if isinstance(metadata, dict):
         for identity_key in IDENTITY_KEYS:
@@ -162,7 +184,7 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None, task:
                 identity = metadata[identity_key]
                 break
     if not isinstance(identity, dict) or not isinstance(identity.get("contract"), dict):
-        raise ValueError("Server is not a Hanoi dense contract-five or six-task policy server")
+        raise ValueError("Server is not a Hanoi dense, six-task or play policy server")
     contract = identity["contract"]
     if contract.get("version") not in ALLOWED_VERSIONS:
         raise ValueError(f"Contract mismatch for version: server {contract.get('version')!r}, client {ALLOWED_VERSIONS}")
@@ -184,10 +206,20 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None, task:
             raise ValueError(f"Task {task!r} is not one of the server's tasks {sorted(tasks)}")
         resolved = {k: tasks[task][k] for k in ("index", "direction", "start_peg", "goal_peg")}
         prompt = tasks[task]["prompt"]
+    elif identity_key == "hanoi_play":
+        goal_board = goal_at_distance(task, distance)  # refuses an unknown task or distance
+        sentences = identity.get("prompts")
+        if not isinstance(sentences, dict) or len(sentences) != 81 or any(text != goal_sentence(board) for board, text in sentences.items()):
+            raise ValueError("Server goal sentences differ from the trained template")
+        resolved = {"index": DIRECTIONS.index(task), "direction": task, "start_peg": task[0], "goal_peg": task[-1],
+                    "start_board": task[0] * 4, "goal_board": goal_board, "distance": distance}
+        prompt = sentences[goal_board]
     else:
         if identity.get("prompt") != PROMPT:
             raise ValueError("Server prompt is not the trained AAAA-to-CCCC instruction")
         resolved, prompt = dict(SINGLE_TASK), PROMPT
+    if identity_key != "hanoi_play" and distance != 15:
+        raise ValueError("--distance needs a play-trained server (goal boards); this server runs full tower moves only")
     if expected_export_sha256 == "selected":
         expected_export_sha256 = SELECTED_EXPORTS.get(identity.get("config_name"))
         if expected_export_sha256 is None:
@@ -195,20 +227,22 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None, task:
     if expected_export_sha256 and identity.get("export_sha256") != expected_export_sha256:
         raise ValueError("Server export is not the selected checkpoint")
     return {**identity, "action_horizon": int(contract["action_horizon"]), "execution_prefix": int(contract["execution_prefix"]),
-            "policy_family": identity.get("model", "pi05_multitask" if identity_key == "hanoi_multitask" else "pi05_dense"),
-            "task": resolved, "task_prompt": prompt, "multitask": identity_key == "hanoi_multitask"}
+            "policy_family": identity.get("model", {"hanoi_multitask": "pi05_multitask", "hanoi_play": "pi05_play"}.get(identity_key, "pi05_dense")),
+            "task": resolved, "task_prompt": prompt, "multitask": identity_key == "hanoi_multitask",
+            "play": identity_key == "hanoi_play", "board_prompts": identity.get("prompts") if identity_key == "hanoi_play" else None}
 
 
 class DenseWebSocketPolicy:
     """Bounded-time OpenPI-protocol transport used by the inference worker."""
 
     def __init__(self, uri: str, *, timeout_s: float, warmup_timeout_s: float, expected_export_sha256: str | None,
-                 task: str = "AAAA_to_CCCC"):
+                 task: str = "AAAA_to_CCCC", distance: int = 15):
         self.timeout_s, self.warmup_timeout_s, self.first = timeout_s, warmup_timeout_s, True
         self.ws = connect(uri, compression=None, max_size=16 * 1024 * 1024, open_timeout=5, close_timeout=0.2)
         try:
             self.metadata = msgpack_numpy.unpackb(self.ws.recv(timeout=5))
-            self.identity = check_contract(self.metadata, expected_export_sha256=expected_export_sha256, task=task)
+            self.identity = check_contract(self.metadata, expected_export_sha256=expected_export_sha256, task=task, distance=distance)
+            self.board_prompts = self.identity["board_prompts"]  # play servers: board -> trained sentence
             self.horizon = self.identity["action_horizon"]
             self.execution_prefix = self.identity["execution_prefix"]
             self.task = self.identity["task"]
@@ -228,6 +262,8 @@ class DenseWebSocketPolicy:
             raise ValueError("Server changed the execution prefix or reference rate")
         if "task_direction" in reply and str(reply["task_direction"]) != self.task["direction"]:
             raise ValueError(f"Server resolved task {reply['task_direction']!r} for a {self.task['direction']} request")
+        if "goal_board" in reply and self.board_prompts is not None and self.board_prompts.get(str(reply["goal_board"])) != observation.get("prompt"):
+            raise ValueError(f"Server resolved goal board {reply['goal_board']!r} for a different sentence")
         return reply
 
     def close(self):
@@ -299,6 +335,8 @@ def main(config: Config):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if not np.isfinite(config.duration_s) or config.duration_s <= 0 or config.start_row < 0:
         raise ValueError("Duration must be finite and positive; start row must be nonnegative")
+    if not np.isfinite(config.stall_s) or config.stall_s <= 0:
+        raise ValueError("--stall-s must be finite and positive")
     if min(config.inference_timeout_s, config.warmup_timeout_s, config.max_tracking_error_m,
            config.max_tick_lateness_s, config.max_segment_stretch) <= 0:
         raise ValueError("Timeouts and tolerances must be positive")
@@ -332,7 +370,8 @@ def main(config: Config):
     gripper_released = returned_home = False
     missed_grasp_stroke_m = None
     tracker = None
-    solved_after = None  # wall time after which the solved run may end (the last release dwell)
+    end_after = end_status = None  # wall time after which the trial ends (the last release dwell), and why
+    arm_protocol, move_budget, last_move_at = False, None, 0.0
     moved_since_close = False
     previous_sigint = signal.getsignal(signal.SIGINT)
 
@@ -350,7 +389,8 @@ def main(config: Config):
         # The server first: its identity fixes the task, hence the start peg, the prompt and the goal.
         policy = DenseWebSocketPolicy(config.server, timeout_s=config.inference_timeout_s,
                                       warmup_timeout_s=config.warmup_timeout_s,
-                                      expected_export_sha256=config.expected_export_sha256 or None, task=config.task)
+                                      expected_export_sha256=config.expected_export_sha256 or None, task=config.task,
+                                      distance=config.distance)
         (output / "server_metadata.json").write_text(json.dumps(policy.metadata, indent=2, default=str) + "\n")
         task = policy.task
         logging.info("Server: %s (%d-step chunks, prefix %d), export %s on %s; task %s (%s -> %s)", policy.identity.get("config_name"),
@@ -360,8 +400,19 @@ def main(config: Config):
             raise ValueError(f"--prefix-rows {config.prefix_rows} must lie between the server's execution prefix "
                              f"{policy.execution_prefix} and its chunk length minus four rows of latency slack ({policy.horizon - 4})")
         start_name = f"above_peg_{task['start_peg'].lower()}" if config.start == "auto" else config.start
-        tracker = BoardTracker(task["start_peg"], task["goal_peg"])
-        log("task", **task, prompt=policy.prompt, start=start_name)
+        tracker = BoardTracker(task["start_peg"], task["goal_peg"], goal_board=task.get("goal_board"))
+        play = bool(policy.identity.get("play"))
+        if config.goal_protocol == "next" and not play:
+            raise ValueError("--goal-protocol next needs a play-trained server (goal board sentences)")
+        arm_protocol = live and (config.trial_rules == "arm_protocol" or (config.trial_rules == "auto" and play))
+        move_budget = 2 * tracker.total if arm_protocol else None
+        if config.goal_protocol == "next":
+            policy.prompt = policy.board_prompts[board_string(next_board(tracker.stacks, tracker.goal))]
+        log("task", **task, prompt=policy.prompt, start=start_name, goal_protocol=config.goal_protocol,
+            trial_rules="arm_protocol" if arm_protocol else "duration", move_budget=move_budget)
+        if play:
+            logging.info("Goal board %s, %d moves from %s; sentence protocol %s; %s", task["goal_board"], tracker.total, task["start_board"],
+                         config.goal_protocol, f"budget {move_budget} moves, stall {config.stall_s:.0f} s" if arm_protocol else "duration rules")
         if config.mode == "replay":
             episode = ReplayEpisode(config.episode)
             if config.start_row + int(config.duration_s * RATE_HZ) >= episode.length:
@@ -428,12 +479,15 @@ def main(config: Config):
                                  prefix=config.prefix_rows, max_stretch=config.max_segment_stretch)
         log("reference_initialized", measured_state=state.tolist(), jaw_open=jaw_open)
         buffer = ActionBuffer(executor, generation=generation)
-        epoch = time.monotonic()
+        epoch = last_move_at = time.monotonic()
         next_tick = 0
         duration_ticks = int(config.duration_s * RATE_HZ)
         grace_ticks = int(config.finish_grace_s * RATE_HZ)
         status = "running"
-        logging.info("Running %s for %.1f seconds; writing %s", config.mode, config.duration_s, output)
+        if arm_protocol:
+            logging.info("Running live under the arm protocol (at most %d moves); writing %s", move_budget, output)
+        else:
+            logging.info("Running %s for %.1f seconds; writing %s", config.mode, config.duration_s, output)
         while True:
             due = epoch + next_tick / RATE_HZ
             time.sleep(max(0.0, due - time.monotonic()))
@@ -482,12 +536,17 @@ def main(config: Config):
             if now < busy_until:
                 continue
             # Segment boundary: end of the run is decided here so a dispatched segment always completes.
-            if solved_after is not None and now >= solved_after:
-                status = "task_solved"
-                log("task_solved", elapsed_s=now - epoch, **{k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")})
-                logging.info("Puzzle solved after %.0f s; returning home", now - epoch)
+            if end_after is not None and now >= end_after:
+                status = end_status
+                log(end_status, elapsed_s=now - epoch, **{k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")})
+                logging.info(END_MESSAGES[end_status], now - epoch)
                 break
-            if tick >= duration_ticks and not (live and jaw_closed and tick < duration_ticks + grace_ticks):
+            if arm_protocol and now - last_move_at > config.stall_s:
+                status = "stalled"
+                log("stalled", elapsed_s=now - epoch, stall_s=config.stall_s, jaw_closed=jaw_closed)
+                logging.info("No completed move for %.0f s; ending the trial", config.stall_s)
+                break
+            if not arm_protocol and tick >= duration_ticks and not (live and jaw_closed and tick < duration_ticks + grace_ticks):
                 status = "duration_reached"
                 log("duration_reached", elapsed_s=now - epoch, jaw_closed=jaw_closed, grace_expired=live and jaw_closed)
                 if live and jaw_closed:
@@ -572,9 +631,22 @@ def main(config: Config):
                     log("move", **{k: v for k, v in move.items() if k != "board"}, board=move["board"],
                         moves_completed=len(tracker.moves), optimal_prefix=tracker.optimal_prefix)
                     logging.info("Move %d: ring %s %s->%s (%s)", len(tracker.moves), move["ring"], move["from"], move["to"],
-                                 "legal" if move["legal"] else "ILLEGAL")
+                                 move["kind"] if move["legal"] else "ILLEGAL")
+                    if move["kind"] != "empty":
+                        last_move_at = now
                     if tracker.solved and config.stop_when_solved:
-                        solved_after = busy_until
+                        end_after, end_status = busy_until, "task_solved"
+                    elif arm_protocol and move["kind"] == "illegal":
+                        end_after, end_status = busy_until, "illegal_move"
+                    elif arm_protocol and tracker.ring_moves >= move_budget:
+                        end_after, end_status = busy_until, "budget_spent"
+                    elif config.goal_protocol == "next" and (target := next_board(tracker.stacks, tracker.goal)) is not None:
+                        # Observations are only submitted again after this release, so every later request carries it.
+                        # The arm is at rest and the queued chunks were just invalidated, which is the reset the executor
+                        # requires before it accepts chunks for a different sentence.
+                        policy.prompt = policy.board_prompts[board_string(target)]
+                        buffer.executor.task = None
+                        log("goal_sentence", board=board_string(target), prompt=policy.prompt)
     except CommandRejected as exc:
         status = "rejected_command"
         log("stopped_on_rejected_command", error=str(exc))
@@ -672,6 +744,9 @@ def main(config: Config):
             "max_tick_lateness_s": max(lateness, default=0.0),
             "task_success": tracker.solved if tracker is not None else None,
             "tag": config.tag,
+            "goal_protocol": config.goal_protocol,
+            "trial_rules": "arm_protocol" if arm_protocol else "duration",
+            "move_budget": move_budget,
             "task_direction": policy.task["direction"] if policy is not None else None,
             "task_prompt": policy.prompt if policy is not None else None,
             **({k: v for k, v in tracker.report().items() if k not in ("moves", "grasps")} if tracker is not None else {}),
@@ -681,7 +756,7 @@ def main(config: Config):
         if isinstance(alignment, dict):
             summary["initial_proprio_alignment"] = alignment
         (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        if config.update_scoreboard and (summary.get("policy_family") or "").endswith("multitask"):
+        if config.update_scoreboard and (summary.get("policy_family") or "").endswith(("multitask", "play")):
             try:
                 from examples.hanoi.deployment import scoreboard
 

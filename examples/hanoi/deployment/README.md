@@ -546,6 +546,32 @@ still to run, and the per-trial rows. Aborted runs are listed but not counted. `
 per task (`--best`), with the methods and conditions not yet tested as hatched grey placeholders
 ([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`).
 
+Play-trained policies (contract seven, `hanoi_play`): a goal-conditioned model trained on play data takes the sentence of a
+goal board (one of 81, e.g. `BAAA` = ring 1 on B, the rest on A) instead of a task prompt. The client follows the arm
+protocol in cosmos-policy's `docs/hanoi_play_arm_protocol.md`. `--task` names the start tower and the path, `--distance`
+(1, 3, 7 or 15, default 15) picks the goal board that many moves along the task's shortest path, and `--goal-protocol`
+chooses the sentence: `final` sends the goal board's sentence for the whole trial (protocol A, the comparison); `next`
+sends, after every move, the sentence of the next board on the shortest path from the tracked board (protocol C, a
+diagnostic that gives the policy a planner's knowledge, reported separately). The client builds each sentence itself and
+refuses a server whose 81 sentences differ from it byte for byte; the server echoes the goal board it resolved and the
+client checks it on every reply. A live run against a play server uses the protocol's trial rules (`--trial-rules`, auto):
+it ends at the goal board (`task_solved`), after twice the goal distance in ring moves (`budget_spent`), on a ring placed
+on a smaller one (`illegal_move`), on a dropped ring (`missed_grasp`), or after `--stall-s` (60) without a completed move
+(`stalled`); `--duration-s` is not used, and every ending opens the gripper and homes. The summary adds `goal_board`,
+`distance`, `goal_protocol`, `move_budget` and `moves_before_first_error` (leading moves that each reduced the graph
+distance to the goal). Each run regenerates `exp_vid/play_scoreboard.md` and `play_trials.csv` in both checkouts: per
+policy, the protocol's pairs in their fixed order (A at distance 15 on six tasks and 1, 3, 7 on two; C at distance 15 on
+six; three trials each, 54 per policy) with trials done, solved, mean clean moves and mean progress, then by distance
+and goal board, what is still to run, and the trials. The comparison chart takes its non-expert bars from the protocol A
+full-tower trials. Serve the Cosmos play export from cosmos-policy with
+`.venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --play`, then for example
+
+```bash
+./run_dense_client.sh --server ws://127.0.0.1:8001 --mode live --task AAAA_to_CCCC                          # A, distance 15
+./run_dense_client.sh --server ws://127.0.0.1:8001 --mode live --task AAAA_to_BBBB --distance 3             # A, goal BBAA
+./run_dense_client.sh --server ws://127.0.0.1:8001 --mode live --task AAAA_to_CCCC --goal-protocol next     # C, distance 15
+```
+
 Camera recording: `--record-bag` on either client starts `ros2 bag record` of the full-frame camera stream and its
 camera_info into `<run>/camera_bag` (mcap, zstd_fast by default) for the whole run, robot initialization through the
 return home, and writes `bag_started`/`bag_stopped` events and a `camera_bag` summary entry with duration, size and

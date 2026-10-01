@@ -12,7 +12,13 @@ peg, ``BoardTracker`` follows the ring stacks from the standard start A = [4, 3,
   moves or detours cost exactly what they cost;
 * ``peak_progress``: the best ``progress`` over the boards reached, so a run that later stacks a ring
   illegally (an unscorable board, ``progress`` None) still gets credit for how far it got;
-* ``solved``: the board is C = [4, 3, 2, 1].
+* ``solved``: the board is the goal (C = [4, 3, 2, 1] by default);
+* ``moves_before_first_error``: leading moves that each reduced the graph distance to the goal.
+
+The goal is a full tower by default, or any of the 81 boards (``goal_board``, peg per ring with ring 1 the
+smallest first, e.g. ``BAAA``), which is what the play-trained policies are asked for: ``goal_sentence`` gives a
+board's trained sentence, ``goal_at_distance`` the board a number of moves along a task's shortest path, and
+``next_board`` the board one move closer (the next-board protocol).
 
 The same tracker runs live in the dense client (to stop a trial when the puzzle is solved) and
 offline in publishing and the trial report (from ``events.jsonl``).
@@ -39,6 +45,46 @@ MOVE_KINDS = ("optimal", "detour", "null", "illegal", "empty")
 
 def peg_of(y_m: float) -> str:
     return "A" if y_m < -0.02 else ("B" if y_m < 0.05 else "C")
+
+
+DIRECTIONS = ("AAAA_to_CCCC", "CCCC_to_AAAA", "AAAA_to_BBBB", "BBBB_to_AAAA", "BBBB_to_CCCC", "CCCC_to_BBBB")
+
+
+def stacks_from_board(board: str) -> dict:
+    """``BAAA`` (peg per ring, ring 1 the smallest first) -> stacks, each bottom to top."""
+    if not isinstance(board, str) or len(board) != RINGS or any(peg not in PEGS for peg in board):
+        raise ValueError(f"Not a board: {board!r}")
+    return {peg: [ring for ring in range(RINGS, 0, -1) if board[ring - 1] == peg] for peg in PEGS}
+
+
+def board_string(stacks: dict) -> str | None:
+    """Stacks -> ``BAAA``; None unless each of the four rings is on exactly one peg."""
+    where = [(ring, peg) for peg in PEGS for ring in stacks[peg]]
+    if sorted(ring for ring, _ in where) != list(range(1, RINGS + 1)):
+        return None
+    return "".join(peg for _, peg in sorted(where))
+
+
+def goal_stacks(goal) -> dict:
+    """A goal given as stacks, a peg letter (the full tower there) or a board string."""
+    if isinstance(goal, dict):
+        return goal
+    return all_on(goal) if len(goal) == 1 else stacks_from_board(goal)
+
+
+def goal_sentence(board: str) -> str:
+    """The play policies' trained sentence for a goal board; must match the server's byte for byte."""
+    stacks_from_board(board)
+    clauses = []
+    for peg in PEGS:
+        rings = [str(i + 1) for i in range(RINGS) if board[i] == peg]
+        if not rings:
+            clauses.append(f"peg {peg} is empty")
+        elif len(rings) == 1:
+            clauses.append(f"peg {peg} holds ring {rings[0]}")
+        else:
+            clauses.append(f"peg {peg} holds rings " + ", ".join(rings[:-1]) + " and " + rings[-1])
+    return "Goal: " + ", ".join(clauses) + "."
 
 
 def spare_of(source: str, target: str) -> str:
@@ -72,26 +118,66 @@ def _legal_moves(stacks: dict):
                 yield nxt
 
 
-def remaining_moves(stacks: dict, goal_peg: str = "C") -> int | None:
-    """Fewest legal moves from ``stacks`` to all rings on ``goal_peg``; None if the board is not a valid Hanoi state."""
+def shortest_path(stacks: dict, goal="C") -> list | None:
+    """Boards from ``stacks`` to the goal inclusive along a shortest legal path; None if ``stacks`` is not a valid Hanoi state.
+
+    The goal is a peg letter (the full tower there), a board string or stacks. Between two full towers, and to the
+    boards the arm protocol uses, the shortest path is unique; elsewhere the first one found is returned.
+    """
     rings = sorted(r for p in PEGS for r in stacks[p])
     if rings != list(range(1, RINGS + 1)) or any(list(stacks[p]) != sorted(stacks[p], reverse=True) for p in PEGS):
         return None
-    start, goal = _key(stacks), _key(all_on(goal_peg))
-    if start == goal:
-        return 0
-    seen = {start}
-    queue = deque([(stacks, 0)])
-    while queue:
-        board, depth = queue.popleft()
+    first = {p: list(v) for p, v in stacks.items()}
+    start, target = _key(first), _key(goal_stacks(goal))
+    parent = {start: None}
+    boards = {start: first}
+    queue = deque([first])
+    while queue and target not in parent:
+        board = queue.popleft()
         for nxt in _legal_moves(board):
             k = _key(nxt)
-            if k == goal:
-                return depth + 1
-            if k not in seen:
-                seen.add(k)
-                queue.append((nxt, depth + 1))
-    return None
+            if k not in parent:
+                parent[k], boards[k] = _key(board), nxt
+                queue.append(nxt)
+    if target not in parent:
+        return None
+    path, k = [], target
+    while k is not None:
+        path.append(boards[k])
+        k = parent[k]
+    return path[::-1]
+
+
+def remaining_moves(stacks: dict, goal="C") -> int | None:
+    """Fewest legal moves from ``stacks`` to the goal (peg letter, board string or stacks); None if the board is not a valid Hanoi state."""
+    path = shortest_path(stacks, goal)
+    return None if path is None else len(path) - 1
+
+
+def next_board(stacks: dict, goal="C") -> dict | None:
+    """The board one move closer to the goal; None at the goal or from an invalid board."""
+    path = shortest_path(stacks, goal)
+    return path[1] if path and len(path) > 1 else None
+
+
+def path_moves(path: list) -> list:
+    """(ring, source, target) for each step of a board path."""
+    moves = []
+    for before, after in zip(path, path[1:]):
+        src = next(p for p in PEGS if len(before[p]) > len(after[p]))
+        dst = next(p for p in PEGS if len(before[p]) < len(after[p]))
+        moves.append((before[src][-1], src, dst))
+    return moves
+
+
+def goal_at_distance(direction: str, distance: int) -> str:
+    """The board ``distance`` moves along a task's shortest path, e.g. (``AAAA_to_CCCC``, 3) -> ``CCAA``."""
+    if direction not in DIRECTIONS:
+        raise ValueError(f"Unknown task {direction!r}; choose from {DIRECTIONS}")
+    path = shortest_path(all_on(direction[0]), direction[-1])
+    if not 1 <= distance < len(path):
+        raise ValueError(f"Distance must be between 1 and {len(path) - 1}")
+    return board_string(path[distance])
 
 
 @dataclasses.dataclass
@@ -103,11 +189,19 @@ class BoardTracker:
     moves: list = dataclasses.field(default_factory=list)
     grasps: list = dataclasses.field(default_factory=list)
     uncertain: bool = False  # a ring was lost mid-carry; the board is no longer known
+    goal_board: str | None = None  # any of the 81 boards; default: the full tower on ``goal_peg``
+    start_board: str | None = None  # default: the full tower on ``start_peg``
 
     def __post_init__(self):
         if self.stacks is None:
-            self.stacks = all_on(self.start_peg)
-        self.optimal = optimal_solution(RINGS, self.start_peg, self.goal_peg)
+            self.stacks = stacks_from_board(self.start_board) if self.start_board else all_on(self.start_peg)
+        self.initial = {p: list(v) for p, v in self.stacks.items()}
+        self.goal = stacks_from_board(self.goal_board) if self.goal_board else all_on(self.goal_peg)
+        path = shortest_path(self.initial, self.goal)
+        if path is None or len(path) < 2:
+            raise ValueError("The start board must be a valid Hanoi state different from the goal")
+        self.total = len(path) - 1
+        self.optimal = path_moves(path)
 
     def grasp(self, peg: str, z_mm: float | None = None, t_s: float | None = None):
         ring = self.stacks[peg][-1] if self.stacks[peg] else None
@@ -123,10 +217,10 @@ class BoardTracker:
     def release(self, peg: str, t_s: float | None = None) -> dict:
         ring, src = self.held if self.held else (None, None)
         legal = ring is not None and (not self.stacks[peg] or self.stacks[peg][-1] > ring)
-        before = remaining_moves(self._with_held_back(), self.goal_peg)
+        before = remaining_moves(self._with_held_back(), self.goal)
         if ring is not None:
             self.stacks[peg].append(ring)
-        after = remaining_moves(self.stacks, self.goal_peg)
+        after = remaining_moves(self.stacks, self.goal)
         if ring is None:
             kind = "empty"  # closed on nothing, then opened: not a ring move
         elif not legal:
@@ -151,7 +245,22 @@ class BoardTracker:
 
     @property
     def solved(self) -> bool:
-        return not self.uncertain and self.held is None and self.stacks == all_on(self.goal_peg)
+        return not self.uncertain and self.held is None and self.stacks == self.goal
+
+    @property
+    def ring_moves(self) -> int:
+        """Rings released on a peg (a close-and-open that held nothing is not a move)."""
+        return sum(1 for m in self.moves if m["kind"] != "empty")
+
+    @property
+    def moves_before_first_error(self) -> int:
+        """Leading moves that each reduced the graph distance to the goal."""
+        n = 0
+        for move in self.moves:
+            if move["kind"] != "optimal":
+                break
+            n += 1
+        return n
 
     @property
     def optimal_prefix(self) -> int:
@@ -164,16 +273,24 @@ class BoardTracker:
         return n
 
     def report(self) -> dict:
-        remaining = None if self.uncertain else remaining_moves(self.stacks if self.held is None else self._with_held_back(), self.goal_peg)
-        total = len(self.optimal)
+        remaining = None if self.uncertain else remaining_moves(self.stacks if self.held is None else self._with_held_back(), self.goal)
+        total = self.total
+
+        def fraction(left):  # a board farther from the goal than the start scores zero, not negative
+            return None if left is None else round(max(0.0, (total - left) / total), 3)
         # Best board reached along the way: an illegal stacking later on makes the final board unscorable,
         # but the run still got as far as it got.
-        boards = [all_on(self.start_peg)] + [m["board"] for m in self.moves]
-        scored = [remaining_moves(b, self.goal_peg) for b in boards]
+        boards = [self.initial] + [m["board"] for m in self.moves]
+        scored = [remaining_moves(b, self.goal) for b in boards]
         peak = min((r for r in scored if r is not None), default=None)
         return {
             "start_peg": self.start_peg,
             "goal_peg": self.goal_peg,
+            "start_board": board_string(self.initial),
+            "goal_board": board_string(self.goal),
+            "distance": total,
+            "ring_moves": self.ring_moves,
+            "moves_before_first_error": self.moves_before_first_error,
             "moves_completed": len(self.moves),
             "legal_moves": sum(1 for m in self.moves if m["legal"]),
             "all_legal": all(m["legal"] for m in self.moves),
@@ -181,8 +298,8 @@ class BoardTracker:
             "move_counts": {k: sum(1 for m in self.moves if m["kind"] == k) for k in MOVE_KINDS},
             "clean": bool(self.moves) and all(m["kind"] == "optimal" for m in self.moves),
             "remaining_moves": remaining,
-            "progress": None if remaining is None else round((total - remaining) / total, 3),
-            "peak_progress": None if peak is None else round((total - peak) / total, 3),
+            "progress": fraction(remaining),
+            "peak_progress": fraction(peak),
             "solved": self.solved,
             "board_uncertain": self.uncertain,
             "final_board": {p: list(v) for p, v in self.stacks.items()},
@@ -198,9 +315,9 @@ class BoardTracker:
         return board
 
 
-def reconstruct(events: list, start_peg: str = "A", goal_peg: str = "C") -> BoardTracker:
+def reconstruct(events: list, start_peg: str = "A", goal_peg: str = "C", goal_board: str | None = None) -> BoardTracker:
     """Replay a run's logged gripper commands (and a missed-grasp stop) through a tracker."""
-    tracker = BoardTracker(start_peg, goal_peg)
+    tracker = BoardTracker(start_peg, goal_peg, goal_board=goal_board)
     t0 = events[0]["monotonic_s"]
     for e in events:
         if e["event"] == "command" and e["kind"] == "gripper":
