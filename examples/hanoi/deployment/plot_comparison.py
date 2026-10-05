@@ -102,7 +102,7 @@ def draw(vals: dict, note: str):
                         fontsize=11.5, handlelength=1.5, handleheight=1.0, columnspacing=2.0)
     for text in legend.get_texts():
         text.set_color(INK)
-    fig.text(0.5, 0.03, note, ha="center", va="bottom", fontsize=8.5, color=MUTED)
+    fig.text(0.5, 0.012, note, ha="center", va="bottom", fontsize=8.5, color=MUTED, linespacing=1.5)
     return fig
 
 
@@ -126,9 +126,9 @@ def main():
             for task, scores in scoreboard.best_trials(rows, family, args.best).items():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
     incomplete = any(measured and not complete for _, measured, _, complete in vals.values())
-    note = (f"Tower of Hanoi on the real arm: mean task progress over the {len(scoreboard.TASKS)} tower moves, best {args.best} trials per task "
-            f"(trials: {', '.join(counts)})." + (f" * fewer than {args.best * len(scoreboard.TASKS)} trials so far." if incomplete else "")
-            + " Hatched grey bars are placeholder values, not yet tested.")
+    note = (f"Tower of Hanoi on the real arm: mean task progress over the {len(scoreboard.TASKS)} tower moves, best {args.best} trials per task. "
+            "Hatched grey bars are placeholder values, not yet tested.\n"
+            f"Trials: {', '.join(counts)}." + (f" * fewer than {args.best * len(scoreboard.TASKS)} trials so far." if incomplete else ""))
     fig = draw(vals, note)
     dests = args.dest or ([OPENPI_ROOT / "exp_vid"] + ([COSMOS_ROOT / "exp_vid"] if COSMOS_ROOT.is_dir() else []))
     for dest in dests:
