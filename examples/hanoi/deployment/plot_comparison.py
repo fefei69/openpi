@@ -40,10 +40,11 @@ GROUPS = ("Expert data", "Non-expert data")
 # The policy family behind a method in each group: six-task models on the optimal demonstrations, play models on play.
 FAMILY_SUFFIX = {"Expert data": "_multitask", "Non-expert data": "_play"}
 # Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
-# percent, task cases tested out of six). Ours: 100% task progress on 2 task cases (user, 2026-10-05).
-REPORTED = {"Expert data": {3: (100.0, 2)}, "Non-expert data": {3: (100.0, 2)}}
-# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey.
-PLACEHOLDERS = {"Expert data": {2: 5, 3: 97}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
+# percent, task cases tested out of six). Ours on non-expert data: 100% task progress on 2 task cases (user, 2026-10-05).
+REPORTED = {"Non-expert data": {3: (100.0, 2)}}
+# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data is
+# not tested: a placeholder at 100.
+PLACEHOLDERS = {"Expert data": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
 ERROR_BAR = "#2b2b29"
