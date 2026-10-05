@@ -1,11 +1,19 @@
 """Bar chart of average task progress per method, expert versus non-expert data.
 
-Measured bars come from the hardware trials under ``data/hanoi/deployment``: per task the best ``--best`` trials
-(3) by progress, averaged per task and then over the tasks, with a trial's progress as in the scoreboard. Expert
-data: the six-task Cosmos and pi0.5 models. Non-expert data: the play-trained models under protocol A (the final
-goal's sentence for the whole trial) on the six full tower moves. A bar with no trials behind it is a placeholder
-value from ``PLACEHOLDERS`` drawn hatched grey: not yet tested; a measured bar that does not yet have ``--best``
-trials on all six tasks is marked ``*``. Writes ``exp_vid/six_task_progress.png`` and ``.pdf`` in both checkouts.
+Bars come from three sources, in this order of precedence:
+
+* measured: the hardware trials under ``data/hanoi/deployment``. Per task the best ``--best`` trials (3) by
+  progress, averaged per task and then over the tasks, with a trial's progress as in the scoreboard. Expert data:
+  the six-task Cosmos and pi0.5 models. Non-expert data: the play-trained models under protocol A (the final
+  goal's sentence for the whole trial) on the six full tower moves. The error bar is the standard error of the
+  mean over the trials counted.
+* reported: ``REPORTED``, results obtained outside this checkout's run logs and entered by hand (mean progress
+  and the number of task cases tested). Drawn like a measured bar, without an error bar because there are no
+  per-trial numbers here.
+* placeholder: ``PLACEHOLDERS``, drawn hatched grey: not yet tested.
+
+A measured or reported bar that does not yet cover all six task cases with ``--best`` trials each is marked
+``*``. Writes ``exp_vid/six_task_progress.png`` and ``.pdf`` in both checkouts.
 
     ./run_plot_comparison.sh
 """
@@ -18,21 +26,27 @@ import matplotlib
 matplotlib.use("Agg")
 from matplotlib.patches import FancyBboxPatch, Patch
 import matplotlib.pyplot as plt
+import numpy as np
 
 from examples.hanoi.deployment import scoreboard
 from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT
 
+# (legend name, tick label, family stem in the run logs or None, colour or None)
 METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("$\\pi_{0.5}$ (VLA)", "$\\pi_{0.5}$\n(VLA)", "pi05", "#eb6834"),
            ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, None),
-           ("Ours", "Ours", None, None))
+           ("Ours", "Ours", "ours", "#1baf7a"))
 GROUPS = ("Expert data", "Non-expert data")
 # The policy family behind a method in each group: six-task models on the optimal demonstrations, play models on play.
 FAMILY_SUFFIX = {"Expert data": "_multitask", "Non-expert data": "_play"}
-# Values for bars with no trials behind them yet, by group then method index. Drawn hatched grey.
-PLACEHOLDERS = {"Expert data": {2: 20, 3: 97}, "Non-expert data": {0: 5, 1: 5, 2: 10, 3: 97}}
+# Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
+# percent, task cases tested out of six). Ours: 100% task progress on 2 task cases (user, 2026-10-05).
+REPORTED = {"Expert data": {3: (100.0, 2)}, "Non-expert data": {3: (100.0, 2)}}
+# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey.
+PLACEHOLDERS = {"Expert data": {2: 5, 3: 97}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
+ERROR_BAR = "#2b2b29"
 
 
 def comparison_rows(since: str | None = None) -> list[dict]:
@@ -41,31 +55,42 @@ def comparison_rows(since: str | None = None) -> list[dict]:
     return scoreboard.collect(since=since) + play
 
 
-def values(rows: list[dict], best: int) -> dict:
-    """(group, method index) -> (percent, measured?, trials counted, complete?)."""
+def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dict:
+    """(group, method index) -> {value (percent), kind, trials, tasks, complete, error (percent or None)}."""
+    reported = REPORTED if reported is None else reported
+    placeholders = PLACEHOLDERS if placeholders is None else placeholders
+    cases = len(scoreboard.TASKS)
     out = {}
     for group in GROUPS:
         for k, (_, _, stem, _) in enumerate(METHODS):
             family = stem + FAMILY_SUFFIX[group] if stem else None
-            measured = scoreboard.average_progress(rows, family, best) if family else None
-            if measured is None:
-                out[(group, k)] = (float(PLACEHOLDERS.get(group, {}).get(k, 0)), False, 0, False)
+            mean = scoreboard.average_progress(rows, family, best) if family else None
+            if mean is not None:
+                picked = scoreboard.best_trials(rows, family, best)
+                scores = [100 * x for v in picked.values() for x in v]
+                error = float(np.std(scores, ddof=1) / np.sqrt(len(scores))) if len(scores) > 1 else None
+                out[(group, k)] = {"value": 100 * mean, "kind": "measured", "trials": len(scores), "tasks": sum(1 for v in picked.values() if v),
+                                   "complete": len(scores) == best * cases, "error": error}
+            elif k in reported.get(group, {}):
+                value, tasks = reported[group][k]
+                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": None, "tasks": int(tasks),
+                                   "complete": int(tasks) == cases, "error": None}
             else:
-                trials = sum(len(v) for v in scoreboard.best_trials(rows, family, best).values())
-                out[(group, k)] = (100 * measured, True, trials, trials == best * len(scoreboard.TASKS))
+                out[(group, k)] = {"value": float(placeholders.get(group, {}).get(k, 0)), "kind": "placeholder", "trials": 0, "tasks": 0,
+                                   "complete": False, "error": None}
     return out
 
 
 def draw(vals: dict, note: str):
     fig = plt.figure(figsize=(11.46, 4.91), dpi=200, facecolor=SURFACE)
-    ax = fig.add_axes([0.13, 0.25, 0.74, 0.53], facecolor=SURFACE)
+    ax = fig.add_axes([0.13, 0.295, 0.74, 0.495], facecolor=SURFACE)
     slot, width = 1.0, 0.86
     centers = {}
     for g, group in enumerate(GROUPS):
         for k in range(len(METHODS)):
             centers[(group, k)] = g * (len(METHODS) + 1.4) * slot + k * slot
     ax.set_xlim(-0.9, max(centers.values()) + 0.9)
-    ax.set_ylim(0, 108)
+    ax.set_ylim(0, 110)
     ax.set_yticks(range(0, 101, 20))
     ax.tick_params(axis="y", length=0, labelsize=11, labelcolor=SECONDARY)
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
@@ -73,37 +98,70 @@ def draw(vals: dict, note: str):
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color("#c9c8c2")
-    ax.set_ylabel("Average task progress (%) \u2191", fontsize=12, color=INK, labelpad=10)
+    ax.set_ylabel("Average task progress (%) ↑", fontsize=12, color=INK, labelpad=10)
     ax.set_xticks([centers[key] for key in centers])
     ax.set_xticklabels([METHODS[k][1] for (_, k) in centers], fontsize=9, linespacing=1.15)
     ax.tick_params(axis="x", length=0, pad=5)
     for label, key in zip(ax.get_xticklabels(), centers):
-        label.set_color(SECONDARY if vals[key][1] else MUTED)
+        label.set_color(MUTED if vals[key]["kind"] == "placeholder" else SECONDARY)
         if METHODS[key[1]][0] == "Ours":
             label.set_fontweight("bold")
     fig.canvas.draw()  # freeze the transforms: bars are drawn in inches so their rounded caps stay round
     radius = 0.045
     for key, x in centers.items():
-        value, measured, _, complete = vals[key]
+        v = vals[key]
+        value, real = v["value"], v["kind"] != "placeholder"
         if value > 0:
             (x0, y0), (x1, y1) = (ax.transData.transform(point) / fig.dpi for point in ((x - width / 2, 0), (x + width / 2, value)))
-            style = dict(facecolor=METHODS[key[1]][3], linewidth=0) if measured else dict(
+            style = dict(facecolor=METHODS[key[1]][3], linewidth=0) if real else dict(
                 facecolor=PLACEHOLDER_FILL, edgecolor=PLACEHOLDER_HATCH, hatch="////", linewidth=0)
             ax.add_patch(FancyBboxPatch((x0, y0 - radius), x1 - x0, y1 - y0 + radius, transform=fig.dpi_scale_trans,
                                         boxstyle=f"round,pad=0,rounding_size={min(radius, (y1 - y0) / 2)}", **style))
-        ax.text(x, value + 2, f"{value:.0f}" + ("*" if measured and not complete else ""), ha="center", va="bottom",
-                fontsize=12.5, color=INK if measured else MUTED)
+        top = value
+        if v["error"]:
+            lower, upper = min(v["error"], value), min(v["error"], 100 - value)  # progress lies between 0 and 100
+            ax.errorbar([x], [value], yerr=[[lower], [upper]], fmt="none", ecolor=ERROR_BAR, elinewidth=1.3, capsize=4, capthick=1.3, zorder=5)
+            top = value + upper
+        ax.text(x, top + 2, f"{value:.0f}" + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
+                fontsize=12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
         middle = (centers[(group, 0)] + centers[(group, len(METHODS) - 1)]) / 2
-        ax.text(middle, -0.21, group, transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=13, color=INK)
-    handles = [Patch(facecolor=color, linewidth=0, label=name) for name, _, family, color in METHODS if family]
-    handles.append(Patch(facecolor=PLACEHOLDER_FILL, edgecolor=PLACEHOLDER_HATCH, hatch="////", linewidth=0, label="Placeholder, not yet tested"))
-    legend = fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.905), ncol=len(handles), frameon=False,
+        ax.text(middle, -0.225, group, transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=13, color=INK)
+    shown = {key[1] for key, v in vals.items() if v["kind"] != "placeholder"}
+    handles = [Patch(facecolor=color, linewidth=0, label=name) for k, (name, _, _, color) in enumerate(METHODS) if k in shown]
+    if any(v["kind"] == "placeholder" for v in vals.values()):
+        handles.append(Patch(facecolor=PLACEHOLDER_FILL, edgecolor=PLACEHOLDER_HATCH, hatch="////", linewidth=0, label="Placeholder, not yet tested"))
+    legend = fig.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 0.915), ncol=len(handles), frameon=False,
                         fontsize=11.5, handlelength=1.5, handleheight=1.0, columnspacing=2.0)
     for text in legend.get_texts():
         text.set_color(INK)
     fig.text(0.5, 0.012, note, ha="center", va="bottom", fontsize=8.5, color=MUTED, linespacing=1.5)
     return fig
+
+
+def footnote(vals: dict, best: int) -> str:
+    cases = len(scoreboard.TASKS)
+
+    def label(key):
+        return f"{key[0].split()[0].lower()} {METHODS[key[1]][1].replace(chr(10), ' ')}"
+
+    measured = [f"{label(key)} {v['trials']}" for key, v in vals.items() if v["kind"] == "measured"]
+    reported = {}
+    for key, v in vals.items():
+        if v["kind"] == "reported":
+            reported.setdefault((METHODS[key[1]][0], v["tasks"]), []).append(key[0].split()[0].lower())
+    lines = [f"Tower of Hanoi on the real arm: mean task progress over the {cases} tower moves, best {best} trials per task. "
+             "Error bars: standard error over the trials counted."]
+    second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
+    second += " ".join(f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data)." for (name, tasks), groups in reported.items())
+    lines.append(second.strip())
+    last = []
+    if any(v["kind"] != "placeholder" and not v["complete"] for v in vals.values()):
+        last.append(f"* not yet all {cases} task cases with {best} trials each.")
+    if any(v["kind"] == "placeholder" for v in vals.values()):
+        last.append("Hatched grey bars are placeholder values, not yet tested.")
+    lines.append(" ".join(last))
+    return "\n".join(line for line in lines if line)
 
 
 def main():
@@ -114,22 +172,17 @@ def main():
     args = parser.parse_args()
     rows = comparison_rows(args.since)
     vals = values(rows, args.best)
-    counts = []
-    for group in GROUPS:
-        for k, (_, tick, stem, _) in enumerate(METHODS):
-            value, measured, trials, complete = vals[(group, k)]
-            if not measured:
-                continue
-            family = stem + FAMILY_SUFFIX[group]
-            counts.append(f"{group.split()[0].lower()} {tick.replace(chr(10), ' ')} {trials}")
-            print(f"{family}: average progress {value:.1f}% over {trials} trials" + ("" if complete else " (incomplete)"))
+    for (group, k), v in vals.items():
+        name = f"{group}, {METHODS[k][1].replace(chr(10), ' ')}"
+        if v["kind"] == "measured":
+            family = METHODS[k][2] + FAMILY_SUFFIX[group]
+            print(f"{name} ({family}): {v['value']:.1f}% +/- {v['error'] or 0:.1f} (standard error) over {v['trials']} trials"
+                  + ("" if v["complete"] else " (incomplete)"))
             for task, scores in scoreboard.best_trials(rows, family, args.best).items():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
-    incomplete = any(measured and not complete for _, measured, _, complete in vals.values())
-    note = (f"Tower of Hanoi on the real arm: mean task progress over the {len(scoreboard.TASKS)} tower moves, best {args.best} trials per task. "
-            "Hatched grey bars are placeholder values, not yet tested.\n"
-            f"Trials: {', '.join(counts)}." + (f" * fewer than {args.best * len(scoreboard.TASKS)} trials so far." if incomplete else ""))
-    fig = draw(vals, note)
+        else:
+            print(f"{name}: {v['value']:.0f}% ({v['kind']}" + (f", {v['tasks']} task cases" if v["kind"] == "reported" else "") + ")")
+    fig = draw(vals, footnote(vals, args.best))
     dests = args.dest or ([OPENPI_ROOT / "exp_vid"] + ([COSMOS_ROOT / "exp_vid"] if COSMOS_ROOT.is_dir() else []))
     for dest in dests:
         dest.mkdir(parents=True, exist_ok=True)

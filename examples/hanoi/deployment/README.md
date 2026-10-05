@@ -544,7 +544,10 @@ still to run, and the per-trial rows. Aborted runs are listed but not counted. `
 `data/hanoi/deployment` to drop it for good. `./run_plot_comparison.sh` draws the comparison bar chart
 (`exp_vid/six_task_progress.png` and `.pdf`): average task progress per method over the six tasks, keeping the best 3 trials
 per task (`--best`), with the methods and conditions not yet tested as hatched grey placeholders
-([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`).
+([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`). Measured bars carry the standard error of the mean
+over the trials counted; results obtained outside these run logs are entered by hand in `REPORTED` (mean progress and
+task cases tested) and drawn like measured bars without an error bar; a bar that does not yet cover all six task cases
+with three trials each is marked `*`.
 
 Play-trained policies (contract seven, `hanoi_play`): a goal-conditioned model trained on play data takes the sentence of a
 goal board (one of 81, e.g. `BAAA` = ring 1 on B, the rest on A) instead of a task prompt. The client follows the arm
