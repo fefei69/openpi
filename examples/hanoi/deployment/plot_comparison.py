@@ -7,9 +7,9 @@ Bars come from three sources, in this order of precedence:
   the six-task Cosmos and pi0.5 models. Non-expert data: the play-trained models under protocol A (the final
   goal's sentence for the whole trial) on the six full tower moves. A box on the bar shows the spread of the
   trials counted: by default the mean plus and minus one standard deviation with a line at the mean and whiskers
-  to the lowest and highest trial (``--spread sd``), or the classic box plot (``--spread quartiles``: first to
-  third quartile, a line at the median, a diamond at the mean, the same whiskers). The label reads mean and
-  standard deviation.
+  to the lowest and highest trial (``--spread sd``), the same with one standard error (``--spread se``, a much
+  shorter box), or the classic box plot (``--spread quartiles``: first to third quartile, a line at the median, a
+  diamond at the mean, the same whiskers). The label reads mean and the box's measure.
 * reported: ``REPORTED``, results obtained outside this checkout's run logs and entered by hand (mean progress
   and the number of task cases tested). Drawn like a measured bar, without a box because there are no
   per-trial numbers here.
@@ -95,21 +95,22 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
     return out
 
 
-def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.34) -> float:
+def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.16) -> float:
     """Draw the box and whiskers for one measured bar; returns the highest point drawn."""
     if mode == "quartiles":
         bottom, top, line = v["q1"], v["q3"], v["median"]
     else:  # progress lies between 0 and 100, so the box is cut there
-        bottom, top, line = max(0.0, v["value"] - v["sd"]), min(100.0, v["value"] + v["sd"]), v["value"]
+        half = v["error"] if mode == "se" else v["sd"]
+        bottom, top, line = max(0.0, v["value"] - half), min(100.0, v["value"] + half), v["value"]
     ink = dict(color=ERROR_BAR, zorder=6, solid_capstyle="butt")
-    ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.5), edgecolor=ERROR_BAR, linewidth=1.2, zorder=5))
-    ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=2.2, **ink)
+    ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.55), edgecolor=ERROR_BAR, linewidth=0.9, zorder=5))
+    ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=1.8, **ink)
     for end, edge in ((v["low"], bottom), (v["high"], top)):
         if abs(end - edge) > 1e-9:
-            ax.plot([x, x], [edge, end], linewidth=1.2, **ink)
-            ax.plot([x - width / 4, x + width / 4], [end, end], linewidth=1.2, **ink)
+            ax.plot([x, x], [edge, end], linewidth=0.9, **ink)
+            ax.plot([x - width / 3, x + width / 3], [end, end], linewidth=0.9, **ink)
     if mode == "quartiles":
-        ax.plot([x], [v["value"]], marker="D", markersize=5.5, markerfacecolor=SURFACE, markeredgecolor=ERROR_BAR, markeredgewidth=1.2, zorder=7)
+        ax.plot([x], [v["value"]], marker="D", markersize=4.5, markerfacecolor=SURFACE, markeredgecolor=ERROR_BAR, markeredgewidth=1.0, zorder=7)
     return max(top, v["high"])
 
 
@@ -152,7 +153,7 @@ def draw(vals: dict, note: str, spread: str = "sd"):
         top, text = value, f"{value:.0f}"
         if v["sd"] is not None:
             top = spread_box(ax, x, v, spread)
-            text += f" \u00b1 {v['sd']:.0f}"
+            text += f" \u00b1 {v['error' if spread == 'se' else 'sd']:.0f}"
         ax.text(x, top + 2, text + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
                 fontsize=11.5 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
@@ -181,11 +182,12 @@ def footnote(vals: dict, best: int, spread: str = "sd") -> str:
     for key, v in vals.items():
         if v["kind"] == "reported":
             reported.setdefault((METHODS[key[1]][0], v["tasks"]), []).append(key[0].split()[0].lower())
+    measure = "standard error" if spread == "se" else "standard deviation"
     box = ("Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial."
            if spread == "quartiles" else
-           "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.")
+           f"Boxes: mean \u00b1 1 {measure} of the trials counted, line at the mean; whiskers: lowest and highest trial.")
     lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task; "
-             "labels read mean \u00b1 standard deviation.", box]
+             f"labels read mean \u00b1 {measure}.", box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
     second += " ".join(f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data)." for (name, tasks), groups in reported.items())
     lines.append(second.strip())
@@ -202,8 +204,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--best", type=int, default=scoreboard.TARGET, help="trials kept per task per policy (the best by progress)")
     parser.add_argument("--since", default=None, help="YYYY-MM-DD; only runs from this date on")
-    parser.add_argument("--spread", choices=("sd", "quartiles"), default="sd",
-                        help="box on each measured bar: mean +/- one standard deviation (sd) or the classic quartile box plot")
+    parser.add_argument("--spread", choices=("sd", "se", "quartiles"), default="sd",
+                        help="box on each measured bar: mean +/- one standard deviation (sd), mean +/- one standard error (se, a much "
+                             "shorter box), or the classic quartile box plot")
     parser.add_argument("--dest", type=Path, nargs="*", default=None, help="folders to write to (default: exp_vid of both checkouts)")
     args = parser.parse_args()
     rows = comparison_rows(args.since)

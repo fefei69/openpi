@@ -33,7 +33,8 @@ def test_a_single_trial_has_no_spread_box():
 def test_both_spread_styles_render(tmp_path):
     rows = [row("cosmos_multitask", task, x) for task in ("AAAA_to_CCCC", "CCCC_to_AAAA") for x in (1.0, 0.6, 0.2)]
     vals = plot_comparison.values(rows, best=3, reported={"Non-expert data": {3: (100.0, 2)}}, placeholders={"Expert data": {2: 5, 3: 100}})
-    for spread in ("sd", "quartiles"):
+    assert "standard error" in plot_comparison.footnote(vals, 3, "se") and "standard deviation" not in plot_comparison.footnote(vals, 3, "se")
+    for spread in ("sd", "se", "quartiles"):
         fig = plot_comparison.draw(vals, plot_comparison.footnote(vals, 3, spread), spread)
         fig.savefig(tmp_path / f"{spread}.png")
         assert (tmp_path / f"{spread}.png").stat().st_size > 10_000
