@@ -95,7 +95,7 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
     return out
 
 
-def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.16) -> float:
+def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
     """Draw the box and whiskers for one measured bar; returns the highest point drawn."""
     if mode == "quartiles":
         bottom, top, line = v["q1"], v["q3"], v["median"]
@@ -103,12 +103,12 @@ def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.16) -> float:
         half = v["error"] if mode == "se" else v["sd"]
         bottom, top, line = max(0.0, v["value"] - half), min(100.0, v["value"] + half), v["value"]
     ink = dict(color=ERROR_BAR, zorder=6, solid_capstyle="butt")
-    ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.55), edgecolor=ERROR_BAR, linewidth=0.9, zorder=5))
-    ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=1.8, **ink)
+    ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.5), edgecolor=ERROR_BAR, linewidth=1.1, zorder=5))
+    ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=2.0, **ink)
     for end, edge in ((v["low"], bottom), (v["high"], top)):
         if abs(end - edge) > 1e-9:
-            ax.plot([x, x], [edge, end], linewidth=0.9, **ink)
-            ax.plot([x - width / 3, x + width / 3], [end, end], linewidth=0.9, **ink)
+            ax.plot([x, x], [edge, end], linewidth=1.1, **ink)
+            ax.plot([x - width / 3.2, x + width / 3.2], [end, end], linewidth=1.1, **ink)
     if mode == "quartiles":
         ax.plot([x], [v["value"]], marker="D", markersize=4.5, markerfacecolor=SURFACE, markeredgecolor=ERROR_BAR, markeredgewidth=1.0, zorder=7)
     return max(top, v["high"])
