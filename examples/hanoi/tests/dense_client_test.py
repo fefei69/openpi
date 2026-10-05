@@ -263,3 +263,12 @@ def test_arm_protocol_stops_release_and_home():
     for status in ("task_solved", "illegal_move", "budget_spent", "stalled"):
         assert stop_actions(status, live=True, return_home_after_duration=True) == (True, True)
         assert stop_actions(status, live=False, return_home_after_duration=True) == (False, False)
+
+
+def test_pi05_play_identity_keeps_its_own_prefix_and_family():
+    identity = play_metadata(model="pi05_play", config_name="pi05_hanoi_play_k5_cycle2",
+                             export_sha256=dense_client.SELECTED_EXPORTS["pi05_hanoi_play_k5_cycle2"])
+    identity["hanoi_play"]["contract"]["execution_prefix"] = 3
+    r = dense_client.check_contract(identity, expected_export_sha256="selected", task="BBBB_to_AAAA", distance=7)
+    assert r["policy_family"] == "pi05_play" and r["execution_prefix"] == 3 and r["play"]
+    assert r["task"]["goal_board"] == "CCCB" and r["task_prompt"] == "Goal: peg A is empty, peg B holds ring 4, peg C holds rings 1, 2 and 3."

@@ -7,6 +7,8 @@ wrapper validates every reply, warms the model up before listening, and serves o
 
     ./run_dense_server.sh                                                   # 30-step variant
     ./run_dense_server.sh --config-name pi05_hanoi_dense_h16_aaaa_to_cccc   # 16-step variant
+    ./run_dense_server.sh --config-name pi05_hanoi_multitask_v6_cycle2      # six tasks, task prompt required
+    ./run_dense_server.sh --config-name pi05_hanoi_play_k5_cycle2           # play, goal board sentence required
     ./run_dense_client.sh --mode live --duration-s 180
 """
 
@@ -21,7 +23,9 @@ DEFAULT_EXPORTS = {
     "pi05_hanoi_dense_aaaa_to_cccc": Path("checkpoints/pi05_hanoi_dense_aaaa_to_cccc/hanoi_dense_20260919/exports/29999"),
     "pi05_hanoi_dense_h16_aaaa_to_cccc": Path("checkpoints/pi05_hanoi_dense_h16_aaaa_to_cccc/hanoi_dense_h16_20260920/exports/29999"),
     "pi05_hanoi_multitask_v6_cycle2": Path("checkpoints/pi05_hanoi_multitask_v6_cycle2/hanoi_multitask_20260926_cycle2/exports/15999"),
+    "pi05_hanoi_play_k5_cycle2": Path("checkpoints/pi05_hanoi_play_k5_cycle2/hanoi_play_20260930_cycle2/exports/31999"),
 }
+IDENTITY_KEYS = {"hanoi_dense": "pi05_dense", "hanoi_multitask": "pi05_multitask", "hanoi_play": "pi05_play"}  # identity key -> family
 
 
 class DensePolicy:
@@ -44,6 +48,8 @@ class DensePolicy:
         for key in ("task", "task_direction"):  # six-task servers echo the task the prompt resolved to
             if key in result:
                 reply[key] = result[key] if isinstance(result[key], str) else int(result[key])
+        if "goal_board_string" in result:  # play servers echo the goal board the sentence resolved to, as a board string
+            reply["goal_board"] = str(result["goal_board_string"])
         return reply
 
 
@@ -87,19 +93,22 @@ def main(config: Config):
         sample_kwargs={"num_steps": config.num_steps},
     )
     metadata = dict(trained.metadata)
-    key = next((k for k in ("hanoi_dense", "hanoi_multitask") if isinstance(metadata.get(k), dict)), None)
+    key = next((k for k in IDENTITY_KEYS if isinstance(metadata.get(k), dict)), None)
     identity = metadata.get(key) if key else None
     if not isinstance(identity, dict) or identity.get("export_sha256") is None:
-        raise RuntimeError("The checkpoint did not publish its hanoi_dense/hanoi_multitask identity; check policy_config")
-    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind,
-                "model": "pi05_multitask" if key == "hanoi_multitask" else "pi05_dense"}
+        raise RuntimeError("The checkpoint did not publish its hanoi_dense/hanoi_multitask/hanoi_play identity; check policy_config")
+    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind, "model": IDENTITY_KEYS[key]}
+    if key == "hanoi_play":  # board -> sentence, the form the client checks (the checkpoint lists boards and sentences in order)
+        identity["prompts"] = dict(zip(identity["boards"], identity["prompts"], strict=True))
     metadata[key] = identity
     policy = DensePolicy(trained, int(identity["contract"]["action_horizon"]))
     logging.info("Export SHA-256 %s (step %s), %d-step chunks", identity["export_sha256"], identity.get("export_step"), policy.horizon)
-    warm_prompt = identity.get("prompt") or (identity.get("prompts") or [None])[0]
+    prompts = identity.get("prompts") or [None]
+    warm_prompt = identity.get("prompt") or next(iter(prompts.values() if isinstance(prompts, dict) else prompts))
     logging.info("Warm-up inference took %.1f s", warm_up(policy, warm_prompt))
     if identity.get("prompts"):
-        logging.info("Six-task server: every request must carry one of %d verbatim prompts", len(identity["prompts"]))
+        logging.info("%s server: every request must carry one of %d verbatim prompts",
+                     "Play" if key == "hanoi_play" else "Six-task", len(identity["prompts"]))
     logging.info("Serving pi0.5 dense Hanoi policy on ws://%s:%d", config.host, config.port)
     WebsocketPolicyServer(policy, host=config.host, port=config.port, metadata=metadata).serve_forever()
 

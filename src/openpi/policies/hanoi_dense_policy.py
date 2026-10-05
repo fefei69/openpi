@@ -62,11 +62,31 @@ VARIANTS = {
         "multitask": True,
         "archive_config": "pi05_hanoi_multitask_v6",
     },
+    # Play recording, language-goal hindsight labels (contract seven, hanoi_play_policy); exports every 2,000.
+    "pi05_hanoi_play_k5": {"horizon": 16, "data_root": "data/hanoi/play_k5_pi05", "updates": 32_000, "kind": "play"},
+    # Second cycle of the play run: fresh optimizer and schedule, initialised from the first cycle's final export.
+    "pi05_hanoi_play_k5_cycle2": {
+        "horizon": 16,
+        "data_root": "data/hanoi/play_k5_pi05",
+        "updates": 32_000,
+        "kind": "play",
+        "archive_config": "pi05_hanoi_play_k5",
+    },
 }
 
 
+def kind_for(config_name: str) -> str:
+    """'dense' (one recording, one prompt), 'multitask' (six prompts) or 'play' (81 goal sentences)."""
+    variant = VARIANTS[config_name]
+    return str(variant.get("kind", "multitask" if variant.get("multitask", False) else "dense"))
+
+
 def is_multitask(config_name: str) -> bool:
-    return bool(VARIANTS[config_name].get("multitask", False))
+    return kind_for(config_name) == "multitask"
+
+
+def is_play(config_name: str) -> bool:
+    return kind_for(config_name) == "play"
 
 
 def updates_for(config_name: str) -> int:
@@ -83,6 +103,10 @@ def contract_for(config_name: str) -> dict:
         from openpi.policies import hanoi_multitask_policy
 
         return hanoi_multitask_policy.CONTRACT
+    if is_play(config_name):
+        from openpi.policies import hanoi_play_policy
+
+        return hanoi_play_policy.CONTRACT
     return {**CONTRACT, "action_horizon": VARIANTS[config_name]["horizon"]}
 
 

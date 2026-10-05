@@ -58,6 +58,7 @@ def trial_row(run: Path) -> dict:
         "task": summary.get("task_direction") or "AAAA_to_CCCC",
         "goal_board": r["goal_board"], "distance": r["distance"], "goal_protocol": summary.get("goal_protocol") or "final",
         "trial_rules": summary.get("trial_rules") or "duration", "first_error": r["moves_before_first_error"], "ring_moves": r["ring_moves"],
+        "start": summary.get("start") or "",
         "status": summary.get("status"), "aborted": commands == 0, "commands": commands,
         "moves": r["moves_completed"], "legal": r["legal_moves"], **{k: r["move_counts"][k] for k in ("optimal", "detour", "null", "illegal")},
         "clean": r["clean"],

@@ -210,10 +210,19 @@ class RawFrameChunkDataset(Dataset):
                 self.task_indices >= len(self.source_paths)
             ):
                 raise ValueError("Dense multi-task archive has malformed task indices")
+            # Goal-conditioned archives carry a separate `prompt_indices` column (81 goal sentences over two files).
+            self.prompt_indices = (
+                rows["prompt_indices"].astype(np.int64) if "prompt_indices" in rows else self.task_indices
+            )
+            if self.prompt_indices.shape != self.task_indices.shape or np.any(self.prompt_indices < 0) or np.any(
+                self.prompt_indices >= len(self.prompts)
+            ):
+                raise ValueError("Dense archive has malformed prompt indices")
         else:
             self.source_paths = [str(rows["source_path"])]
             self.prompts = [str(rows["prompt"])]
             self.task_indices = np.zeros(len(rows["source_observation_indices"]), dtype=np.int64)
+            self.prompt_indices = self.task_indices
         self.source_path = self.source_paths[0]
         self.prompt = self.prompts[0]
         observations = rows["source_observation_indices"]
@@ -227,8 +236,8 @@ class RawFrameChunkDataset(Dataset):
             raise ValueError("Dense observations must be a nonempty row index array")
         for task in np.unique(self.task_indices):
             rows_of_task = observations[self.task_indices == task]
-            if np.any(rows_of_task[1:] <= rows_of_task[:-1]):
-                raise ValueError("Dense observations must be strictly increasing within each recording")
+            if len(np.unique(rows_of_task)) != len(rows_of_task):
+                raise ValueError("Dense observations must be unique within each recording")
         if actions.shape != (n, self.horizon, 4) or not np.isfinite(actions).all():
             raise ValueError("Dense actions must be finite (n, horizon, 4) reference poses")
         if states.ndim != 2 or states.shape[0] != n or not np.isfinite(states).all():
@@ -276,10 +285,11 @@ class RawFrameChunkDataset(Dataset):
             "state": self.rows["states"][i].copy(),
             "actions": self.rows["actions"][i].copy(),
             "actions_is_pad": self.rows["actions_is_pad"][i].copy(),
-            "prompt": self.prompts[task],
+            "prompt": self.prompts[int(self.prompt_indices[i])],
             "episode_index": int(self.rows["episode_indices"][i]),
             "source_row": row,
             "task": task,
+            "prompt_index": int(self.prompt_indices[i]),
         }
 
 

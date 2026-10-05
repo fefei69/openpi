@@ -549,6 +549,8 @@ class LeRobotHanoiDenseDataConfig(DataConfigFactory):
     dense_archive_path: str = "data/hanoi/dense_v5_pi05/indices/aaaa_to_cccc_train.npz"
     # Six-task variant: the verbatim task prompt is required and the resolved task is echoed in the reply.
     multitask: bool = False
+    # Play variant: the goal board's sentence (one of 81) is required and the resolved board is echoed in the reply.
+    play: bool = False
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -560,6 +562,11 @@ class LeRobotHanoiDenseDataConfig(DataConfigFactory):
 
             inputs = [hanoi_multitask_policy.HanoiMultitaskInputs(horizon=model_config.action_horizon)]
             outputs = [hanoi_multitask_policy.HanoiMultitaskOutputs(horizon=model_config.action_horizon)]
+        elif self.play:
+            import openpi.policies.hanoi_play_policy as hanoi_play_policy
+
+            inputs = [hanoi_play_policy.HanoiPlayInputs(horizon=model_config.action_horizon)]
+            outputs = [hanoi_play_policy.HanoiPlayOutputs(horizon=model_config.action_horizon)]
         else:
             inputs = [hanoi_dense_policy.HanoiDenseInputs(horizon=model_config.action_horizon)]
             outputs = [hanoi_dense_policy.HanoiDenseOutputs(horizon=model_config.action_horizon)]
@@ -861,6 +868,68 @@ _CONFIGS = [
         policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_multitask_v6_cycle2"),
         policy_metadata_module="openpi.policies.hanoi_multitask_policy",
         policy_output_context_keys=("task",),
+    ),
+    TrainConfig(
+        # Play recording with the Cosmos play_k5 rows, goals, labels and 81 goal sentences (handover 2026-09-30):
+        # dense v5 chunk cut at the goal move, 16 slots, 32,000 updates, exports every 2,000. Standard pi0.5 state
+        # tokens and the library-default image augmentation, as in every run of this series (user's choice).
+        name="pi05_hanoi_play_k5",
+        assets_base_dir="data/hanoi/play_k5_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_play_k5_raw",
+            assets=AssetsConfig(asset_id="local/hanoi_play_k5"),
+            dense_archive_path="data/hanoi/play_k5_pi05/indices/play_train.npz",
+            play=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=32_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=32_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_play_k5"),
+        policy_metadata_module="openpi.policies.hanoi_play_policy",
+        policy_output_context_keys=("goal_board",),
+    ),
+    TrainConfig(
+        # Second cycle of the play run (user, 2026-10-01: "if 32000 steps is not good enough plz continue training"):
+        # same data and recipe, fresh optimizer and cosine schedule, weights from the first cycle's final export.
+        name="pi05_hanoi_play_k5_cycle2",
+        assets_base_dir="data/hanoi/play_k5_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_play_k5_raw",
+            assets=AssetsConfig(
+                assets_dir="data/hanoi/play_k5_pi05/assets/pi05_hanoi_play_k5",
+                asset_id="local/hanoi_play_k5",
+            ),
+            dense_archive_path="data/hanoi/play_k5_pi05/indices/play_train.npz",
+            play=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/pi05_hanoi_play_k5/hanoi_play_20260930/exports/31999/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=32_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=32_000,
+        batch_size=32,
+        save_interval=2_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_play_k5_cycle2"),
+        policy_metadata_module="openpi.policies.hanoi_play_policy",
+        policy_output_context_keys=("goal_board",),
     ),
     TrainConfig(
         name=hanoi_waypoint_policy.CONFIG_NAME,

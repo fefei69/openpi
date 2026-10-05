@@ -206,13 +206,13 @@ def render_play(rows: list[dict], target: int = TARGET, after: str | None = None
         counted = [r for r in fam if not r["aborted"]]
         if counted:
             lines += ["", "### Trials", "",
-                      "| # | date | protocol | task | distance | goal | run | status | moves (optimal / detour / null / illegal) | clean moves | progress | reason |",
-                      "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                      "| # | date | protocol | task | distance | goal | start pose | run | status | moves (optimal / detour / null / illegal) | clean moves | progress | reason |",
+                      "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
             for k, r in enumerate(counted, 1):
                 prog = pct(r["progress"]) if r["progress"] is not None else pct(r["peak_progress"]) + "*"
                 kinds = f"{r['ring_moves']} ({r['optimal']} / {r['detour']} / {r['null']} / {r['illegal']})"
                 lines.append(f"| {k} | {r['date']} | {'A' if r['goal_protocol'] == 'final' else 'C'} | {r['task']} | {r['distance']} | {r['goal_board']} | "
-                             f"{r['run']} | {r['status']} | {kinds} | {r['first_error']} | {prog} | {r['reason']} |")
+                             f"{r['start']} | {r['run']} | {r['status']} | {kinds} | {r['first_error']} | {prog} | {r['reason']} |")
         aborted = [r for r in fam if r["aborted"]]
         if aborted:
             lines += ["", "Aborted, not counted: " + "; ".join(f"{r['run']} ({r['task']}, {r['reason']})" for r in aborted)]

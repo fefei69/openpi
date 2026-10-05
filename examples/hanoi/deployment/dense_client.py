@@ -77,6 +77,8 @@ SELECTED_EXPORTS = {
     "cosmos_hanoi_multitask_v6_h16_cycle2": "5bca94e1f6948ff0bd1d0989673f04d620e1343388e7cfb7e6b6c8af467fb53c",
     # Cosmos play_k5 contract seven (weights file SHA-256), video init, iter 32000: goal board sentence required.
     "cosmos_hanoi_play_k5_h16": "1544c36873db0c9f3fa40287133f3265e031ae40e8958c176c58e9e9ed4472c6",
+    # pi0.5 play_k5 contract seven, cycle 2, export 31999 (export.json SHA-256): prefix 3, goal board sentence required.
+    "pi05_hanoi_play_k5_cycle2": "3522c8afec2c202622eb60799b35c1cbd4e5ba59e6413e55ae2addece61f2f32",
 }
 SELECTED_EXPORT_SHA256 = SELECTED_EXPORTS["pi05_hanoi_dense_aaaa_to_cccc"]
 ALLOWED_HORIZONS = (30, 16)
