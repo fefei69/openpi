@@ -19,7 +19,8 @@ def test_values_prefer_measured_then_reported_then_placeholder():
     assert (vals[("Expert data", 2)]["kind"], vals[("Expert data", 2)]["value"], vals[("Non-expert data", 2)]["value"]) == ("placeholder", 5.0, 2.0)
     assert vals[("Non-expert data", 0)]["kind"] == "placeholder"  # no play trials in these rows
     note = plot_comparison.footnote(vals, 3)
-    assert "mean \u00b1 1 standard deviation" in note and "Trials: expert Cosmos Policy 3." in note
+    assert "standard error of the mean" in note and "standard deviation" not in note and "Trials: expert Cosmos Policy 3." in note
+    assert "mean \u00b1 1 standard deviation" in plot_comparison.footnote(vals, 3, "sd")
     assert "first to third quartile" in plot_comparison.footnote(vals, 3, "quartiles")
     assert "Ours: 2 of 6 task cases so far (expert data)." in note and "* not yet all 6 task cases with 3 trials each." in note
     assert "placeholder values" in note
@@ -33,7 +34,7 @@ def test_a_single_trial_has_no_spread_box():
 def test_both_spread_styles_render(tmp_path):
     rows = [row("cosmos_multitask", task, x) for task in ("AAAA_to_CCCC", "CCCC_to_AAAA") for x in (1.0, 0.6, 0.2)]
     vals = plot_comparison.values(rows, best=3, reported={"Non-expert data": {3: (100.0, 2)}}, placeholders={"Expert data": {2: 5, 3: 100}})
-    assert "standard error" in plot_comparison.footnote(vals, 3, "se") and "standard deviation" not in plot_comparison.footnote(vals, 3, "se")
+    assert plot_comparison.footnote(vals, 3) == plot_comparison.footnote(vals, 3, "se")  # the standard error is the default
     for spread in ("sd", "se", "quartiles"):
         fig = plot_comparison.draw(vals, plot_comparison.footnote(vals, 3, spread), spread)
         fig.savefig(tmp_path / f"{spread}.png")

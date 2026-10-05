@@ -5,11 +5,12 @@ Bars come from three sources, in this order of precedence:
 * measured: the hardware trials under ``data/hanoi/deployment``. Per task the best ``--best`` trials (3) by
   progress, averaged per task and then over the tasks, with a trial's progress as in the scoreboard. Expert data:
   the six-task Cosmos and pi0.5 models. Non-expert data: the play-trained models under protocol A (the final
-  goal's sentence for the whole trial) on the six full tower moves. A box on the bar shows the spread of the
-  trials counted: by default the mean plus and minus one standard deviation with a line at the mean and whiskers
-  to the lowest and highest trial (``--spread sd``), the same with one standard error (``--spread se``, a much
-  shorter box), or the classic box plot (``--spread quartiles``: first to third quartile, a line at the median, a
-  diamond at the mean, the same whiskers). The label reads mean and the box's measure.
+  goal's sentence for the whole trial) on the six full tower moves. By default each bar carries an error bar of
+  one standard error of the mean over all trials counted, tasks pooled (``--spread se``): the uncertainty of the
+  average, which is what a comparison between methods needs. ``--spread sd`` draws a box instead (mean plus and
+  minus one standard deviation of single trials, line at the mean, whiskers to the lowest and highest trial) and
+  ``--spread quartiles`` the classic box plot (first to third quartile, median line, mean diamond, same whiskers).
+  The label reads the mean and the measure drawn.
 * reported: ``REPORTED``, results obtained outside this checkout's run logs and entered by hand (mean progress
   and the number of task cases tested). Drawn like a measured bar, without a box because there are no
   per-trial numbers here.
@@ -96,12 +97,15 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
 
 
 def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
-    """Draw the box and whiskers for one measured bar; returns the highest point drawn."""
+    """Draw the error bar (``se``) or the box and whiskers for one measured bar; returns the highest point drawn."""
+    if mode == "se":  # uncertainty of the mean: a plain error bar, cut at the ends of the 0 to 100 scale
+        lower, upper = min(v["error"], v["value"]), min(v["error"], 100.0 - v["value"])
+        ax.errorbar([x], [v["value"]], yerr=[[lower], [upper]], fmt="none", ecolor=ERROR_BAR, elinewidth=1.4, capsize=5, capthick=1.4, zorder=6)
+        return v["value"] + upper
     if mode == "quartiles":
         bottom, top, line = v["q1"], v["q3"], v["median"]
     else:  # progress lies between 0 and 100, so the box is cut there
-        half = v["error"] if mode == "se" else v["sd"]
-        bottom, top, line = max(0.0, v["value"] - half), min(100.0, v["value"] + half), v["value"]
+        bottom, top, line = max(0.0, v["value"] - v["sd"]), min(100.0, v["value"] + v["sd"]), v["value"]
     ink = dict(color=ERROR_BAR, zorder=6, solid_capstyle="butt")
     ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.5), edgecolor=ERROR_BAR, linewidth=1.1, zorder=5))
     ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=2.0, **ink)
@@ -114,7 +118,7 @@ def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
     return max(top, v["high"])
 
 
-def draw(vals: dict, note: str, spread: str = "sd"):
+def draw(vals: dict, note: str, spread: str = "se"):
     fig = plt.figure(figsize=(11.46, 4.91), dpi=200, facecolor=SURFACE)
     ax = fig.add_axes([0.13, 0.325, 0.74, 0.475], facecolor=SURFACE)
     slot, width = 1.0, 0.86
@@ -171,7 +175,7 @@ def draw(vals: dict, note: str, spread: str = "sd"):
     return fig
 
 
-def footnote(vals: dict, best: int, spread: str = "sd") -> str:
+def footnote(vals: dict, best: int, spread: str = "se") -> str:
     cases = len(scoreboard.TASKS)
 
     def label(key):
@@ -183,9 +187,9 @@ def footnote(vals: dict, best: int, spread: str = "sd") -> str:
         if v["kind"] == "reported":
             reported.setdefault((METHODS[key[1]][0], v["tasks"]), []).append(key[0].split()[0].lower())
     measure = "standard error" if spread == "se" else "standard deviation"
-    box = ("Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial."
-           if spread == "quartiles" else
-           f"Boxes: mean \u00b1 1 {measure} of the trials counted, line at the mean; whiskers: lowest and highest trial.")
+    box = {"quartiles": "Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial.",
+           "sd": "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.",
+           "se": "Error bars: \u00b1 1 standard error of the mean, over all trials counted (all tasks pooled)."}[spread]
     lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task; "
              f"labels read mean \u00b1 {measure}.", box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
@@ -204,9 +208,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--best", type=int, default=scoreboard.TARGET, help="trials kept per task per policy (the best by progress)")
     parser.add_argument("--since", default=None, help="YYYY-MM-DD; only runs from this date on")
-    parser.add_argument("--spread", choices=("sd", "se", "quartiles"), default="sd",
-                        help="box on each measured bar: mean +/- one standard deviation (sd), mean +/- one standard error (se, a much "
-                             "shorter box), or the classic quartile box plot")
+    parser.add_argument("--spread", choices=("se", "sd", "quartiles"), default="se",
+                        help="on each measured bar: an error bar of one standard error of the mean over all trials counted (se, default), "
+                             "a box of the mean +/- one standard deviation with min-max whiskers (sd), or the classic quartile box plot")
     parser.add_argument("--dest", type=Path, nargs="*", default=None, help="folders to write to (default: exp_vid of both checkouts)")
     args = parser.parse_args()
     rows = comparison_rows(args.since)

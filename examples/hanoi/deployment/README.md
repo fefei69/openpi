@@ -544,9 +544,10 @@ still to run, and the per-trial rows. Aborted runs are listed but not counted. `
 `data/hanoi/deployment` to drop it for good. `./run_plot_comparison.sh` draws the comparison bar chart
 (`exp_vid/six_task_progress.png` and `.pdf`): average task progress per method over the six tasks, keeping the best 3 trials
 per task (`--best`), with the methods and conditions not yet tested as hatched grey placeholders
-([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`). Each measured bar carries a box for the spread of the
-trials counted (mean plus and minus one standard deviation with a line at the mean, whiskers to the lowest and highest
-trial; `--spread quartiles` draws the classic quartile box plot instead) and a label reading mean and standard deviation;
+([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`). Each measured bar carries an error bar of one standard
+error of the mean over all trials counted, tasks pooled, and a label reading mean and standard error (`--spread sd` draws a
+box of the mean plus and minus one standard deviation of single trials with min-max whiskers instead, `--spread quartiles`
+the classic quartile box plot);
 results obtained outside these run logs are entered by hand in `REPORTED` (mean progress and task cases tested) and drawn
 like measured bars without a box; a bar that does not yet cover all six task cases
 with three trials each is marked `*`.
