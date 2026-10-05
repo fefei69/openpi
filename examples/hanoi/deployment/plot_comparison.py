@@ -5,10 +5,13 @@ Bars come from three sources, in this order of precedence:
 * measured: the hardware trials under ``data/hanoi/deployment``. Per task the best ``--best`` trials (3) by
   progress, averaged per task and then over the tasks, with a trial's progress as in the scoreboard. Expert data:
   the six-task Cosmos and pi0.5 models. Non-expert data: the play-trained models under protocol A (the final
-  goal's sentence for the whole trial) on the six full tower moves. The error bar is the standard error of the
-  mean over the trials counted.
+  goal's sentence for the whole trial) on the six full tower moves. A box on the bar shows the spread of the
+  trials counted: by default the mean plus and minus one standard deviation with a line at the mean and whiskers
+  to the lowest and highest trial (``--spread sd``), or the classic box plot (``--spread quartiles``: first to
+  third quartile, a line at the median, a diamond at the mean, the same whiskers). The label reads mean and
+  standard deviation.
 * reported: ``REPORTED``, results obtained outside this checkout's run logs and entered by hand (mean progress
-  and the number of task cases tested). Drawn like a measured bar, without an error bar because there are no
+  and the number of task cases tested). Drawn like a measured bar, without a box because there are no
   per-trial numbers here.
 * placeholder: ``PLACEHOLDERS``, drawn hatched grey: not yet tested.
 
@@ -24,7 +27,7 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")
-from matplotlib.patches import FancyBboxPatch, Patch
+from matplotlib.patches import FancyBboxPatch, Patch, Rectangle
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -45,6 +48,7 @@ REPORTED = {"Non-expert data": {3: (100.0, 2)}}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data is
 # not tested: a placeholder at 100.
 PLACEHOLDERS = {"Expert data": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
+NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
 ERROR_BAR = "#2b2b29"
@@ -57,7 +61,11 @@ def comparison_rows(since: str | None = None) -> list[dict]:
 
 
 def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dict:
-    """(group, method index) -> {value (percent), kind, trials, tasks, complete, error (percent or None)}."""
+    """(group, method index) -> {value (percent), kind, trials, tasks, complete, spread statistics in percent or None}.
+
+    Spread of the trials counted: ``sd`` (sample standard deviation), ``error`` (standard error of the mean), ``low`` and
+    ``high`` (lowest and highest trial), ``q1``/``median``/``q3``; all None unless there are at least two trials.
+    """
     reported = REPORTED if reported is None else reported
     placeholders = PLACEHOLDERS if placeholders is None else placeholders
     cases = len(scoreboard.TASKS)
@@ -69,29 +77,52 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
             if mean is not None:
                 picked = scoreboard.best_trials(rows, family, best)
                 scores = [100 * x for v in picked.values() for x in v]
-                error = float(np.std(scores, ddof=1) / np.sqrt(len(scores))) if len(scores) > 1 else None
+                spread = dict(NO_SPREAD)
+                if len(scores) > 1:
+                    sd = float(np.std(scores, ddof=1))
+                    q1, median, q3 = (float(q) for q in np.percentile(scores, [25, 50, 75]))
+                    spread = {"sd": sd, "error": sd / float(np.sqrt(len(scores))), "low": float(min(scores)), "high": float(max(scores)),
+                              "q1": q1, "median": median, "q3": q3}
                 out[(group, k)] = {"value": 100 * mean, "kind": "measured", "trials": len(scores), "tasks": sum(1 for v in picked.values() if v),
-                                   "complete": len(scores) == best * cases, "error": error}
+                                   "complete": len(scores) == best * cases, **spread}
             elif k in reported.get(group, {}):
                 value, tasks = reported[group][k]
                 out[(group, k)] = {"value": float(value), "kind": "reported", "trials": None, "tasks": int(tasks),
-                                   "complete": int(tasks) == cases, "error": None}
+                                   "complete": int(tasks) == cases, **NO_SPREAD}
             else:
                 out[(group, k)] = {"value": float(placeholders.get(group, {}).get(k, 0)), "kind": "placeholder", "trials": 0, "tasks": 0,
-                                   "complete": False, "error": None}
+                                   "complete": False, **NO_SPREAD}
     return out
 
 
-def draw(vals: dict, note: str):
+def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.34) -> float:
+    """Draw the box and whiskers for one measured bar; returns the highest point drawn."""
+    if mode == "quartiles":
+        bottom, top, line = v["q1"], v["q3"], v["median"]
+    else:  # progress lies between 0 and 100, so the box is cut there
+        bottom, top, line = max(0.0, v["value"] - v["sd"]), min(100.0, v["value"] + v["sd"]), v["value"]
+    ink = dict(color=ERROR_BAR, zorder=6, solid_capstyle="butt")
+    ax.add_patch(Rectangle((x - width / 2, bottom), width, top - bottom, facecolor=(1, 1, 1, 0.5), edgecolor=ERROR_BAR, linewidth=1.2, zorder=5))
+    ax.plot([x - width / 2, x + width / 2], [line, line], linewidth=2.2, **ink)
+    for end, edge in ((v["low"], bottom), (v["high"], top)):
+        if abs(end - edge) > 1e-9:
+            ax.plot([x, x], [edge, end], linewidth=1.2, **ink)
+            ax.plot([x - width / 4, x + width / 4], [end, end], linewidth=1.2, **ink)
+    if mode == "quartiles":
+        ax.plot([x], [v["value"]], marker="D", markersize=5.5, markerfacecolor=SURFACE, markeredgecolor=ERROR_BAR, markeredgewidth=1.2, zorder=7)
+    return max(top, v["high"])
+
+
+def draw(vals: dict, note: str, spread: str = "sd"):
     fig = plt.figure(figsize=(11.46, 4.91), dpi=200, facecolor=SURFACE)
-    ax = fig.add_axes([0.13, 0.295, 0.74, 0.495], facecolor=SURFACE)
+    ax = fig.add_axes([0.13, 0.325, 0.74, 0.475], facecolor=SURFACE)
     slot, width = 1.0, 0.86
     centers = {}
     for g, group in enumerate(GROUPS):
         for k in range(len(METHODS)):
             centers[(group, k)] = g * (len(METHODS) + 1.4) * slot + k * slot
     ax.set_xlim(-0.9, max(centers.values()) + 0.9)
-    ax.set_ylim(0, 110)
+    ax.set_ylim(0, 112)
     ax.set_yticks(range(0, 101, 20))
     ax.tick_params(axis="y", length=0, labelsize=11, labelcolor=SECONDARY)
     ax.yaxis.grid(True, color=GRID, linewidth=0.8)
@@ -118,13 +149,12 @@ def draw(vals: dict, note: str):
                 facecolor=PLACEHOLDER_FILL, edgecolor=PLACEHOLDER_HATCH, hatch="////", linewidth=0)
             ax.add_patch(FancyBboxPatch((x0, y0 - radius), x1 - x0, y1 - y0 + radius, transform=fig.dpi_scale_trans,
                                         boxstyle=f"round,pad=0,rounding_size={min(radius, (y1 - y0) / 2)}", **style))
-        top = value
-        if v["error"]:
-            lower, upper = min(v["error"], value), min(v["error"], 100 - value)  # progress lies between 0 and 100
-            ax.errorbar([x], [value], yerr=[[lower], [upper]], fmt="none", ecolor=ERROR_BAR, elinewidth=1.3, capsize=4, capthick=1.3, zorder=5)
-            top = value + upper
-        ax.text(x, top + 2, f"{value:.0f}" + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
-                fontsize=12.5, color=INK if real else MUTED)
+        top, text = value, f"{value:.0f}"
+        if v["sd"] is not None:
+            top = spread_box(ax, x, v, spread)
+            text += f" \u00b1 {v['sd']:.0f}"
+        ax.text(x, top + 2, text + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
+                fontsize=11.5 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
         middle = (centers[(group, 0)] + centers[(group, len(METHODS) - 1)]) / 2
         ax.text(middle, -0.225, group, transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=13, color=INK)
@@ -136,11 +166,11 @@ def draw(vals: dict, note: str):
                         fontsize=11.5, handlelength=1.5, handleheight=1.0, columnspacing=2.0)
     for text in legend.get_texts():
         text.set_color(INK)
-    fig.text(0.5, 0.012, note, ha="center", va="bottom", fontsize=8.5, color=MUTED, linespacing=1.5)
+    fig.text(0.5, 0.01, note, ha="center", va="bottom", fontsize=8.2, color=MUTED, linespacing=1.45)
     return fig
 
 
-def footnote(vals: dict, best: int) -> str:
+def footnote(vals: dict, best: int, spread: str = "sd") -> str:
     cases = len(scoreboard.TASKS)
 
     def label(key):
@@ -151,8 +181,11 @@ def footnote(vals: dict, best: int) -> str:
     for key, v in vals.items():
         if v["kind"] == "reported":
             reported.setdefault((METHODS[key[1]][0], v["tasks"]), []).append(key[0].split()[0].lower())
-    lines = [f"Tower of Hanoi on the real arm: mean task progress over the {cases} tower moves, best {best} trials per task. "
-             "Error bars: standard error over the trials counted."]
+    box = ("Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial."
+           if spread == "quartiles" else
+           "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.")
+    lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task; "
+             "labels read mean \u00b1 standard deviation.", box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
     second += " ".join(f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data)." for (name, tasks), groups in reported.items())
     lines.append(second.strip())
@@ -169,6 +202,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--best", type=int, default=scoreboard.TARGET, help="trials kept per task per policy (the best by progress)")
     parser.add_argument("--since", default=None, help="YYYY-MM-DD; only runs from this date on")
+    parser.add_argument("--spread", choices=("sd", "quartiles"), default="sd",
+                        help="box on each measured bar: mean +/- one standard deviation (sd) or the classic quartile box plot")
     parser.add_argument("--dest", type=Path, nargs="*", default=None, help="folders to write to (default: exp_vid of both checkouts)")
     args = parser.parse_args()
     rows = comparison_rows(args.since)
@@ -177,13 +212,14 @@ def main():
         name = f"{group}, {METHODS[k][1].replace(chr(10), ' ')}"
         if v["kind"] == "measured":
             family = METHODS[k][2] + FAMILY_SUFFIX[group]
-            print(f"{name} ({family}): {v['value']:.1f}% +/- {v['error'] or 0:.1f} (standard error) over {v['trials']} trials"
-                  + ("" if v["complete"] else " (incomplete)"))
+            stats = "" if v["sd"] is None else (f", standard deviation {v['sd']:.1f} (variance {v['sd'] ** 2:.0f}), standard error {v['error']:.1f}, "
+                                                 f"range {v['low']:.0f} to {v['high']:.0f}, quartiles {v['q1']:.0f} / {v['median']:.0f} / {v['q3']:.0f}")
+            print(f"{name} ({family}): mean {v['value']:.1f}% over {v['trials']} trials{stats}" + ("" if v["complete"] else " (incomplete)"))
             for task, scores in scoreboard.best_trials(rows, family, args.best).items():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
         else:
             print(f"{name}: {v['value']:.0f}% ({v['kind']}" + (f", {v['tasks']} task cases" if v["kind"] == "reported" else "") + ")")
-    fig = draw(vals, footnote(vals, args.best))
+    fig = draw(vals, footnote(vals, args.best, args.spread), args.spread)
     dests = args.dest or ([OPENPI_ROOT / "exp_vid"] + ([COSMOS_ROOT / "exp_vid"] if COSMOS_ROOT.is_dir() else []))
     for dest in dests:
         dest.mkdir(parents=True, exist_ok=True)
