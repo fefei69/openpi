@@ -7,7 +7,7 @@ def row(family, task, progress):
 
 def test_values_prefer_measured_then_reported_then_placeholder():
     rows = [row("cosmos_multitask", "AAAA_to_CCCC", x) for x in (1.0, 0.5, 0.0)]
-    vals = plot_comparison.values(rows, best=3, reported={"Expert data": {3: (100.0, 2)}, "Non-expert data": {3: (100.0, 6)}},
+    vals = plot_comparison.values(rows, best=3, reported={"Expert data": {3: (100.0, 2)}, "Non-expert data": {3: (100.0, 6, 18)}},
                                   placeholders={"Expert data": {2: 5}, "Non-expert data": {2: 2}})
     measured = vals[("Expert data", 0)]
     assert (measured["kind"], measured["value"], measured["trials"], measured["tasks"], measured["complete"]) == ("measured", 50.0, 3, 1, False)
@@ -15,7 +15,7 @@ def test_values_prefer_measured_then_reported_then_placeholder():
     assert (measured["sd"], measured["low"], measured["high"], measured["q1"], measured["median"], measured["q3"]) == (50.0, 0.0, 100.0, 25.0, 50.0, 75.0)
     reported = vals[("Expert data", 3)]
     assert (reported["value"], reported["kind"], reported["trials"], reported["tasks"], reported["complete"], reported["sd"]) == (100.0, "reported", None, 2, False, None)
-    assert vals[("Non-expert data", 3)]["complete"]  # all six task cases reported
+    assert vals[("Non-expert data", 3)]["complete"] and vals[("Non-expert data", 3)]["trials"] == 18  # all six task cases reported
     assert (vals[("Expert data", 2)]["kind"], vals[("Expert data", 2)]["value"], vals[("Non-expert data", 2)]["value"]) == ("placeholder", 5.0, 2.0)
     assert vals[("Non-expert data", 0)]["kind"] == "placeholder"  # no play trials in these rows
     note = plot_comparison.footnote(vals, 3)
@@ -23,6 +23,7 @@ def test_values_prefer_measured_then_reported_then_placeholder():
     assert "mean \u00b1 1 standard deviation" in plot_comparison.footnote(vals, 3, "sd")
     assert "first to third quartile" in plot_comparison.footnote(vals, 3, "quartiles")
     assert "Ours: 2 of 6 task cases so far (expert data)." in note and "* not yet all 6 task cases with 3 trials each." in note
+    assert "Ours: 18 trials on all 6 task cases (non-expert data)." in note
     assert "placeholder values" in note
 
 

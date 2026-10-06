@@ -44,8 +44,9 @@ GROUPS = ("Expert data", "Non-expert data")
 # The policy family behind a method in each group: six-task models on the optimal demonstrations, play models on play.
 FAMILY_SUFFIX = {"Expert data": "_multitask", "Non-expert data": "_play"}
 # Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
-# percent, task cases tested out of six). Ours on non-expert data: 100% task progress on 2 task cases (user, 2026-10-05).
-REPORTED = {"Non-expert data": {3: (100.0, 2)}}
+# percent, task cases tested out of six, trials). Ours on non-expert data: 100% task progress over 18 trials on all six
+# task cases (user, 2026-10-06).
+REPORTED = {"Non-expert data": {3: (100.0, 6, 18)}}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data is
 # not tested: a placeholder at 100.
 PLACEHOLDERS = {"Expert data": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
@@ -87,8 +88,8 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
                 out[(group, k)] = {"value": 100 * mean, "kind": "measured", "trials": len(scores), "tasks": sum(1 for v in picked.values() if v),
                                    "complete": len(scores) == best * cases, **spread}
             elif k in reported.get(group, {}):
-                value, tasks = reported[group][k]
-                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": None, "tasks": int(tasks),
+                value, tasks, *trials = reported[group][k]
+                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": int(trials[0]) if trials else None, "tasks": int(tasks),
                                    "complete": int(tasks) == cases, **NO_SPREAD}
             else:
                 out[(group, k)] = {"value": float(placeholders.get(group, {}).get(k, 0)), "kind": "placeholder", "trials": 0, "tasks": 0,
@@ -185,7 +186,7 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     reported = {}
     for key, v in vals.items():
         if v["kind"] == "reported":
-            reported.setdefault((METHODS[key[1]][0], v["tasks"]), []).append(key[0].split()[0].lower())
+            reported.setdefault((METHODS[key[1]][0], v["tasks"], v["trials"]), []).append(key[0].split()[0].lower())
     measure = "standard error" if spread == "se" else "standard deviation"
     box = {"quartiles": "Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial.",
            "sd": "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.",
@@ -193,7 +194,9 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task; "
              f"labels read mean \u00b1 {measure}.", box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
-    second += " ".join(f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data)." for (name, tasks), groups in reported.items())
+    second += " ".join((f"{name}: {trials} trials on all {cases} task cases ({' and '.join(groups)} data)." if tasks == cases and trials else
+                        f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data).")
+                       for (name, tasks, trials), groups in reported.items())
     lines.append(second.strip())
     last = []
     if any(v["kind"] != "placeholder" and not v["complete"] for v in vals.values()):
