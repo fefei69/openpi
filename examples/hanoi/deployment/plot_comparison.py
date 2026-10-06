@@ -40,16 +40,19 @@ METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("$\\pi_{0.5}$ (VLA)", "$\\pi_{0.5}$\n(VLA)", "pi05", "#eb6834"),
            ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, None),
            ("Ours", "Ours", "ours", "#1baf7a"))
-GROUPS = ("Expert data", "Non-expert data")
-# The policy family behind a method in each group: six-task models on the optimal demonstrations, play models on play.
-FAMILY_SUFFIX = {"Expert data": "_multitask", "Non-expert data": "_play"}
+GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
+SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
+# The policy family behind a method in each group, from the run logs: six-task models on the optimal demonstrations
+# (the full 15-move tower, H15), play models on play. The one-move setting (H1) has no run logs here.
+FAMILY_SUFFIX = {"Expert data (H15)": "_multitask", "Non-expert data": "_play"}
 # Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
-# percent, task cases tested out of six, trials). Ours on non-expert data: 100% task progress over 18 trials on all six
-# task cases (user, 2026-10-06).
-REPORTED = {"Non-expert data": {3: (100.0, 6, 18)}}
-# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data is
-# not tested: a placeholder at 100.
-PLACEHOLDERS = {"Expert data": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
+# percent, task cases tested out of six or None when unknown, trials when known). Ours on non-expert data: 100% task
+# progress over 18 trials on all six task cases (user, 2026-10-06). Expert data (H1): Cosmos Policy, pi0.5 and Ours
+# reach 100% (user, 2026-10-06; no trial counts given).
+REPORTED = {"Expert data (H1)": {0: (100.0, None), 1: (100.0, None), 3: (100.0, None)}, "Non-expert data": {3: (100.0, 6, 18)}}
+# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data
+# (H15) is not tested: a placeholder at 100.
+PLACEHOLDERS = {"Expert data (H1)": {2: 50}, "Expert data (H15)": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
 NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
@@ -74,7 +77,7 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
     out = {}
     for group in GROUPS:
         for k, (_, _, stem, _) in enumerate(METHODS):
-            family = stem + FAMILY_SUFFIX[group] if stem else None
+            family = stem + FAMILY_SUFFIX[group] if stem and group in FAMILY_SUFFIX else None
             mean = scoreboard.average_progress(rows, family, best) if family else None
             if mean is not None:
                 picked = scoreboard.best_trials(rows, family, best)
@@ -89,8 +92,8 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
                                    "complete": len(scores) == best * cases, **spread}
             elif k in reported.get(group, {}):
                 value, tasks, *trials = reported[group][k]
-                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": int(trials[0]) if trials else None, "tasks": int(tasks),
-                                   "complete": int(tasks) == cases, **NO_SPREAD}
+                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": int(trials[0]) if trials else None,
+                                   "tasks": None if tasks is None else int(tasks), "complete": tasks is None or int(tasks) == cases, **NO_SPREAD}
             else:
                 out[(group, k)] = {"value": float(placeholders.get(group, {}).get(k, 0)), "kind": "placeholder", "trials": 0, "tasks": 0,
                                    "complete": False, **NO_SPREAD}
@@ -120,8 +123,8 @@ def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
 
 
 def draw(vals: dict, note: str, spread: str = "se"):
-    fig = plt.figure(figsize=(11.46, 4.91), dpi=200, facecolor=SURFACE)
-    ax = fig.add_axes([0.13, 0.325, 0.74, 0.475], facecolor=SURFACE)
+    fig = plt.figure(figsize=(14.6, 4.91), dpi=200, facecolor=SURFACE)
+    ax = fig.add_axes([0.10, 0.325, 0.80, 0.475], facecolor=SURFACE)
     slot, width = 1.0, 0.86
     centers = {}
     for g, group in enumerate(GROUPS):
@@ -180,25 +183,30 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     cases = len(scoreboard.TASKS)
 
     def label(key):
-        return f"{key[0].split()[0].lower()} {METHODS[key[1]][1].replace(chr(10), ' ')}"
+        return f"{SHORT_GROUP[key[0]]} {METHODS[key[1]][1].replace(chr(10), ' ')}"
 
     measured = [f"{label(key)} {v['trials']}" for key, v in vals.items() if v["kind"] == "measured"]
-    reported = {}
+    reported, uncounted = {}, {}
     for key, v in vals.items():
-        if v["kind"] == "reported":
-            reported.setdefault((METHODS[key[1]][0], v["tasks"], v["trials"]), []).append(key[0].split()[0].lower())
+        if v["kind"] == "reported" and v["tasks"] is None:
+            uncounted.setdefault(SHORT_GROUP[key[0]], []).append(METHODS[key[1]][0])
+        elif v["kind"] == "reported":
+            reported.setdefault((METHODS[key[1]][0], v["tasks"], v["trials"]), []).append(SHORT_GROUP[key[0]])
     measure = "standard error" if spread == "se" else "standard deviation"
     box = {"quartiles": "Boxes: first to third quartile of the trials counted, line at the median, diamond at the mean; whiskers: lowest and highest trial.",
            "sd": "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.",
            "se": "Error bars: \u00b1 1 standard error of the mean, over all trials counted (all tasks pooled)."}[spread]
     lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task; "
-             f"labels read mean \u00b1 {measure}.", box]
+             f"labels read mean \u00b1 {measure}. " + box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
     second += " ".join((f"{name}: {trials} trials on all {cases} task cases ({' and '.join(groups)} data)." if tasks == cases and trials else
                         f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data).")
                        for (name, tasks, trials), groups in reported.items())
     lines.append(second.strip())
     last = []
+    for group, names in uncounted.items():
+        joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        last.append(f"{group[0].upper()}{group[1:]}: {joined} reported without trial counts.")
     if any(v["kind"] != "placeholder" and not v["complete"] for v in vals.values()):
         last.append(f"* not yet all {cases} task cases with {best} trials each.")
     if any(v["kind"] == "placeholder" for v in vals.values()):
