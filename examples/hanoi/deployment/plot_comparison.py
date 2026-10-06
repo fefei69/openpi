@@ -47,12 +47,12 @@ SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15
 FAMILY_SUFFIX = {"Expert data (H15)": "_multitask", "Non-expert data": "_play"}
 # Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
 # percent, task cases tested out of six or None when unknown, trials when known). Ours on non-expert data: 100% task
-# progress over 18 trials on all six task cases (user, 2026-10-06). Expert data (H1): Cosmos Policy, pi0.5 and Ours
-# reach 100% (user, 2026-10-06; no trial counts given).
-REPORTED = {"Expert data (H1)": {0: (100.0, None), 1: (100.0, None), 3: (100.0, None)}, "Non-expert data": {3: (100.0, 6, 18)}}
-# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Ours on expert data
-# (H15) is not tested: a placeholder at 100.
-PLACEHOLDERS = {"Expert data (H1)": {2: 50}, "Expert data (H15)": {2: 5, 3: 100}, "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
+# progress over 18 trials on all six task cases (user, 2026-10-06).
+REPORTED = {"Non-expert data": {3: (100.0, 6, 18)}}
+# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. The whole one-move
+# (H1) group and Ours on expert data (H15) are not tested.
+PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50, 3: 100}, "Expert data (H15)": {2: 5, 3: 100},
+                "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
 NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
