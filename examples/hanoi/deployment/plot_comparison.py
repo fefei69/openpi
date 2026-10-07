@@ -122,9 +122,10 @@ def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
     return max(top, v["high"])
 
 
-def draw(vals: dict, note: str, spread: str = "se"):
-    fig = plt.figure(figsize=(14.6, 4.91), dpi=200, facecolor=SURFACE)
-    ax = fig.add_axes([0.10, 0.325, 0.80, 0.475], facecolor=SURFACE)
+def draw(vals: dict, note: str | None, spread: str = "se"):
+    """The figure; ``note`` is the footnote under the chart, or None for a bare figure whose caption lives in the paper."""
+    fig = plt.figure(figsize=(14.6, 4.91 if note else 4.3), dpi=200, facecolor=SURFACE)
+    ax = fig.add_axes([0.10, 0.325, 0.80, 0.475] if note else [0.10, 0.21, 0.80, 0.60], facecolor=SURFACE)
     slot, width = 1.0, 0.86
     centers = {}
     for g, group in enumerate(GROUPS):
@@ -175,7 +176,8 @@ def draw(vals: dict, note: str, spread: str = "se"):
                         fontsize=11.5, handlelength=1.5, handleheight=1.0, columnspacing=2.0)
     for text in legend.get_texts():
         text.set_color(INK)
-    fig.text(0.5, 0.01, note, ha="center", va="bottom", fontsize=8.2, color=MUTED, linespacing=1.45)
+    if note:
+        fig.text(0.5, 0.01, note, ha="center", va="bottom", fontsize=8.2, color=MUTED, linespacing=1.45)
     return fig
 
 
@@ -223,6 +225,9 @@ def main():
                         help="on each measured bar: an error bar of one standard error of the mean over all trials counted (se, default), "
                              "a box of the mean +/- one standard deviation with min-max whiskers (sd), or the classic quartile box plot")
     parser.add_argument("--dest", type=Path, nargs="*", default=None, help="folders to write to (default: exp_vid of both checkouts)")
+    parser.add_argument("--footnote", action="store_true",
+                        help="print the explanatory footnote under the chart; by default the figure is bare and the text is printed here "
+                             "for the paper's caption")
     args = parser.parse_args()
     rows = comparison_rows(args.since)
     vals = values(rows, args.best)
@@ -237,7 +242,9 @@ def main():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
         else:
             print(f"{name}: {v['value']:.0f}% ({v['kind']}" + (f", {v['tasks']} task cases" if v["kind"] == "reported" else "") + ")")
-    fig = draw(vals, footnote(vals, args.best, args.spread), args.spread)
+    note = footnote(vals, args.best, args.spread)
+    print("Caption text:\n  " + note.replace("\n", "\n  "))
+    fig = draw(vals, note if args.footnote else None, args.spread)
     dests = args.dest or ([OPENPI_ROOT / "exp_vid"] + ([COSMOS_ROOT / "exp_vid"] if COSMOS_ROOT.is_dir() else []))
     for dest in dests:
         dest.mkdir(parents=True, exist_ok=True)

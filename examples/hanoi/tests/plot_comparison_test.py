@@ -45,3 +45,5 @@ def test_both_spread_styles_render(tmp_path):
         fig = plot_comparison.draw(vals, plot_comparison.footnote(vals, 3, spread), spread)
         fig.savefig(tmp_path / f"{spread}.png")
         assert (tmp_path / f"{spread}.png").stat().st_size > 10_000
+    bare = plot_comparison.draw(vals, None)
+    assert not bare.texts and bare.get_figheight() < 4.91  # no footnote, and the figure shrinks to the chart
