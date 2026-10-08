@@ -11,9 +11,10 @@ Bars come from three sources, in this order of precedence:
   minus one standard deviation of single trials, line at the mean, whiskers to the lowest and highest trial) and
   ``--spread quartiles`` the classic box plot (first to third quartile, median line, mean diamond, same whiskers).
   The label reads the mean and the measure drawn.
-* reported: ``REPORTED``, results obtained outside this checkout's run logs and entered by hand (mean progress
-  and the number of task cases tested). Drawn like a measured bar, without a box because there are no
-  per-trial numbers here.
+* hand-entered trials: ``HAND_TRIALS``, per-trial scores from another agent's logs. They join the measured rows
+  and are treated exactly like them (best trials per task, mean, standard error, counts).
+* reported: ``REPORTED``, results known only as an average (mean progress and the number of task cases tested).
+  Drawn like a measured bar, without an error bar because there are no per-trial numbers.
 * placeholder: ``PLACEHOLDERS``, drawn hatched grey: not yet tested.
 
 A measured or reported bar that does not yet cover all six task cases with ``--best`` trials each is marked
@@ -45,24 +46,50 @@ SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15
 # The policy family behind a method in each group, from the run logs: six-task models on the optimal demonstrations
 # (the full 15-move tower, H15), play models on play. The one-move setting (H1) has no run logs here.
 FAMILY_SUFFIX = {"Expert data (H15)": "_multitask", "Non-expert data": "_play"}
-# Results obtained outside this checkout's run logs, entered by hand: group -> method index -> (mean progress in
-# percent, task cases tested out of six or None when unknown, trials when known). Ours on non-expert data: 100% task
-# progress over 18 trials on all six task cases (user, 2026-10-06).
-REPORTED = {"Non-expert data": {3: (100.0, 6, 18)}}
+# Per-trial scores from another agent's logs, entered by hand: group -> method index -> [(task, progress in percent)].
+# Ours (user, 2026-10-08). Expert data (H15): the 18-trial campaign of 2026-10-07 with fixed settings, including its one
+# 93.3, and not the extra trial run after it. Non-expert data: the final play runner of 2026-10-05/06, with the three
+# B-to-A trials taken from the 2026-10-07 re-run that added the recovery fix and the transit guard (100 each) in place
+# of the three 40s before those rules; a 60 with the recovery fix only is left out. Eighteen trials each.
+HAND_TRIALS = {
+    "Expert data (H15)": {3: [
+        ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
+        ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
+        ("AAAA_to_CCCC", 93.3), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
+    ]},
+    "Non-expert data": {3: [
+        ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100),
+        ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100), ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100),
+        ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100),
+    ]},
+}
+# Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
+# None when unknown, trials when known). None at the moment.
+REPORTED = {}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. The whole one-move
-# (H1) group and Ours on expert data (H15) are not tested.
-PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50, 3: 100}, "Expert data (H15)": {2: 5, 3: 100},
-                "Non-expert data": {0: 5, 1: 5, 2: 2, 3: 97}}
+# (H1) group and V-JEPA 2-AC are not tested.
+PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50, 3: 100}, "Expert data (H15)": {2: 5}, "Non-expert data": {2: 2}}
 NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
 ERROR_BAR = "#2b2b29"
 
 
+def hand_rows(hand_trials=None) -> list[dict]:
+    """The hand-entered trials as scoreboard-style rows, under the family the group and method map to."""
+    rows = []
+    for group, methods in (HAND_TRIALS if hand_trials is None else hand_trials).items():
+        for k, trials in methods.items():
+            family = METHODS[k][2] + FAMILY_SUFFIX[group]
+            rows += [{"family": family, "task": task, "progress": score / 100, "peak_progress": score / 100, "aborted": False, "hand_entered": True}
+                     for task, score in trials]
+    return rows
+
+
 def comparison_rows(since: str | None = None) -> list[dict]:
-    """Six-task trials plus the play trials that are comparable to them: protocol A on the full tower moves."""
+    """Six-task trials plus the play trials that are comparable to them (protocol A on the full tower moves), plus the hand-entered ones."""
     play = [r for r in scoreboard.collect(since=since, play=True) if r["goal_protocol"] == "final" and r["distance"] == 15]
-    return scoreboard.collect(since=since) + play
+    return scoreboard.collect(since=since) + play + hand_rows()
 
 
 def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dict:
@@ -204,6 +231,9 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     second += " ".join((f"{name}: {trials} trials on all {cases} task cases ({' and '.join(groups)} data)." if tasks == cases and trials else
                         f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data).")
                        for (name, tasks, trials), groups in reported.items())
+    hand = [f"{SHORT_GROUP[group]} {METHODS[k][1].replace(chr(10), ' ')}" for group, methods in HAND_TRIALS.items() for k in methods]
+    if hand:
+        second += " Entered from another agent's logs: " + ", ".join(hand) + "."
     lines.append(second.strip())
     last = []
     for group, names in uncounted.items():

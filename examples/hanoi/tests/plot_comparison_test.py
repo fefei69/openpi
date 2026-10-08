@@ -47,3 +47,14 @@ def test_both_spread_styles_render(tmp_path):
         assert (tmp_path / f"{spread}.png").stat().st_size > 10_000
     bare = plot_comparison.draw(vals, None)
     assert not bare.texts and bare.get_figheight() < 4.91  # no footnote, and the figure shrinks to the chart
+
+
+def test_hand_entered_trials_count_like_measured_ones():
+    hand = {"Expert data (H15)": {3: [(task, 100) for task in plot_comparison.scoreboard.TASKS for _ in range(3)]}}
+    hand["Expert data (H15)"][3][0] = ("AAAA_to_CCCC", 93.3)
+    rows = plot_comparison.hand_rows(hand)
+    assert len(rows) == 18 and (rows[0]["family"], rows[0]["task"], rows[0]["aborted"], rows[0]["hand_entered"]) == ("ours_multitask", "AAAA_to_CCCC", False, True)
+    assert round(rows[0]["progress"], 3) == round(rows[0]["peak_progress"], 3) == 0.933
+    v = plot_comparison.values(rows, best=3, reported={}, placeholders={})[("Expert data (H15)", 3)]
+    assert (v["kind"], v["trials"], v["complete"], round(v["value"], 2), round(v["sd"], 2), round(v["error"], 2)) == ("measured", 18, True, 99.63, 1.58, 0.37)
+    assert len(plot_comparison.hand_rows()) == 36 and all(r["family"] in ("ours_multitask", "ours_play") for r in plot_comparison.hand_rows())
