@@ -58,3 +58,7 @@ def test_hand_entered_trials_count_like_measured_ones():
     v = plot_comparison.values(rows, best=3, reported={}, placeholders={})[("Expert data (H15)", 3)]
     assert (v["kind"], v["trials"], v["complete"], round(v["value"], 2), round(v["sd"], 2), round(v["error"], 2)) == ("measured", 18, True, 99.63, 1.58, 0.37)
     assert len(plot_comparison.hand_rows()) == 36 and all(r["family"] in ("ours_multitask", "ours_play") for r in plot_comparison.hand_rows())
+
+
+def test_labels_never_round_onto_the_bounds():
+    assert [plot_comparison.fmt(x) for x in (100.0, 99.63, 99.4, 75.6, 0.37, 0.0, 4.8)] == ["100", "99.6", "99", "76", "0.4", "0", "5"]

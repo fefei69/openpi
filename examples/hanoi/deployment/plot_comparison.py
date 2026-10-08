@@ -149,6 +149,12 @@ def spread_box(ax, x: float, v: dict, mode: str, width: float = 0.26) -> float:
     return max(top, v["high"])
 
 
+def fmt(x: float) -> str:
+    """A label value: whole percent, except that a result short of 100 (or above 0) never rounds onto that bound."""
+    whole = round(x)
+    return f"{x:.1f}" if (whole == 100 and x < 100) or (whole == 0 and x > 0) else f"{whole:.0f}"
+
+
 def draw(vals: dict, note: str | None, spread: str = "se"):
     """The figure; ``note`` is the footnote under the chart, or None for a bare figure whose caption lives in the paper."""
     fig = plt.figure(figsize=(14.6, 4.91 if note else 4.3), dpi=200, facecolor=SURFACE)
@@ -186,10 +192,10 @@ def draw(vals: dict, note: str | None, spread: str = "se"):
                 facecolor=PLACEHOLDER_FILL, edgecolor=PLACEHOLDER_HATCH, hatch="////", linewidth=0)
             ax.add_patch(FancyBboxPatch((x0, y0 - radius), x1 - x0, y1 - y0 + radius, transform=fig.dpi_scale_trans,
                                         boxstyle=f"round,pad=0,rounding_size={min(radius, (y1 - y0) / 2)}", **style))
-        top, text = value, f"{value:.0f}"
+        top, text = value, fmt(value)
         if v["sd"] is not None:
             top = spread_box(ax, x, v, spread)
-            text += f" \u00b1 {v['error' if spread == 'se' else 'sd']:.0f}"
+            text += f" \u00b1 {fmt(v['error' if spread == 'se' else 'sd'])}"
         ax.text(x, top + 2, text + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
                 fontsize=11.5 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
