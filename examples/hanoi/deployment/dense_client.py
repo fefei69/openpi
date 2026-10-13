@@ -166,6 +166,10 @@ class Config:
     finish_grace_s: float = 30.0
     # Free-text label for a series of trials; recorded in config.json and summary.json for the trial report.
     tag: str = ""
+    # Run this many trials in a row. After each one the arm releases and returns to joint home as usual, the client
+    # waits for Enter while the board is reset by hand, then the next trial starts from scratch (home, start pose,
+    # alignment). Each trial is its own run folder. Ctrl-C at the prompt, an operator stop or a failure ends the series.
+    repeats: int = 1
     # After a six-task or play-policy run, regenerate exp_vid/six_task_scoreboard.md and exp_vid/play_scoreboard.md
     # (success rate, progress, move quality per case per policy) in both checkouts from every recorded run.
     update_scoreboard: bool = True
@@ -342,7 +346,31 @@ def observe_hardware(arm, camera, tick, *, require_orientation, jaw_closed, min_
 
 
 def main(config: Config):
+    """``--repeats`` trials of the same configuration, with a pause for a manual board reset between them."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if config.repeats < 1:
+        raise ValueError("--repeats must be at least 1")
+    for trial in range(1, config.repeats + 1):
+        if config.repeats > 1:
+            logging.info("Trial %d of %d", trial, config.repeats)
+        summary = run_trial(config)
+        if trial == config.repeats:
+            break
+        if summary["status"] in ("operator_stop", "failed", "cleanup_failed"):
+            logging.info("Series stopped after trial %d (%s)", trial, summary["status"])
+            break
+        start = summary.get("start_board") or summary.get("start_peg") or "the start peg"
+        try:
+            input(f"Trial {trial} of {config.repeats} done ({summary['status']}). Put all four rings back on peg "
+                  f"{start[0] if isinstance(start, str) else start}, then press Enter for trial {trial + 1} (Ctrl-C to stop): ")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            logging.info("Series stopped at the prompt after trial %d", trial)
+            break
+
+
+def run_trial(config: Config) -> dict:
+    """One trial: connect, initialise the arm, run the policy until the trial ends, release and home; returns the summary."""
     if not np.isfinite(config.duration_s) or config.duration_s <= 0 or config.start_row < 0:
         raise ValueError("Duration must be finite and positive; start row must be nonnegative")
     if not np.isfinite(config.stall_s) or config.stall_s <= 0:
@@ -443,7 +471,7 @@ def main(config: Config):
             arm.orientation_limit_deg = config.max_orientation_error_deg
             if live:
                 signal.signal(signal.SIGINT, signal.default_int_handler)
-                logging.info("Moving arm to the recorded %s pose %s and aligning XYZ within 0.5 mm",
+                logging.info("Moving arm to the recorded %s pose %s and aligning XYZ (corrects above 0.5 mm, verified within 1 mm)",
                              start_name, np.round(start_xyz, 4).tolist())
                 log("robot_initialized", **arm.initialize())
         deadline = time.monotonic() + 5
@@ -786,6 +814,7 @@ def main(config: Config):
         logging.info("Result: %s", summary)
         if status == "cleanup_failed":
             raise RuntimeError("Deployment cleanup failed; see events.jsonl")
+    return summary
 
 
 if __name__ == "__main__":

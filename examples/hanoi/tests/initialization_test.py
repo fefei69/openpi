@@ -163,7 +163,7 @@ def test_alignment_accumulates_corrections_against_original_desired_pose(robot):
 
 
 @pytest.mark.parametrize(
-    ("offset_m", "corrections", "reason"), [(0.001, 3, "three-correction"), (0.002, 2, "exceeds 5 mm")]
+    ("offset_m", "corrections", "reason"), [(0.0015, 3, "three-correction"), (0.002, 2, "exceeds 5 mm")]
 )
 def test_alignment_stops_at_correction_or_compensation_limit(tmp_path, robot, offset_m, corrections, reason):
     _, driver, output, _ = robot
@@ -302,7 +302,7 @@ def test_live_client_rejects_unaligned_pose_before_inference(tmp_path, monkeypat
 
     def no_correction_response(target, *args, **kwargs):
         original(target, *args, **kwargs)
-        output.cartesian.positions[:3] = hardware.INITIAL_XYZ + np.array([0.001, 0, 0])
+        output.cartesian.positions[:3] = hardware.INITIAL_XYZ + np.array([0.0015, 0, 0])
 
     driver.set_cartesian_positions.side_effect = no_correction_response
     camera, policy = Mock(), Mock()
@@ -317,7 +317,7 @@ def test_live_client_rejects_unaligned_pose_before_inference(tmp_path, monkeypat
     assert summary["status"] == "failed"
     assert summary["accepted_commands"] == 0
     assert summary["initial_proprio_alignment"]["passed"] is False
-    assert summary["initial_proprio_alignment"]["final_error_mm"] == pytest.approx(1.0, abs=0.0001)
+    assert summary["initial_proprio_alignment"]["final_error_mm"] == pytest.approx(1.5, abs=0.0001)
     driver.cleanup.assert_called_once()
     camera.close.assert_called_once()
 

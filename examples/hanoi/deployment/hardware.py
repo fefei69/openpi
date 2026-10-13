@@ -21,7 +21,12 @@ from examples.hanoi.deployment.execution import Command
 # User-specified rod-A setup: K4326 medoid 1296, observation 87660.
 INITIAL_XYZ = np.array([0.492297590, -0.056030598, 0.191169396])
 INITIAL_ROTVEC = np.array([0.0, 0.785398163, 0.0])
-INITIAL_POSITION_TOLERANCE_M = 0.0005
+# The start pose is verified again after the warm-up; 1 mm since 2026-10-13 (0.5 mm failed a 0.37 mm arrival that
+# crept 0.17 mm during the warm-up; the user judged the check too strict).
+INITIAL_POSITION_TOLERANCE_M = 0.001
+# The alignment corrects the arrival while it is above this.
+INITIAL_CORRECTION_TARGET_M = 0.0005
+INITIAL_SETTLE_S = 0.5  # wait after a move to the start pose before measuring the arrival
 INITIAL_ALIGNMENT_CORRECTIONS = 3
 INITIAL_MAX_COMPENSATION_M = 0.005
 INITIAL_JAW_M = 0.034  # Recorded open_fraction * max_stroke.
@@ -302,11 +307,12 @@ class TrossenArm:
         )
         self.driver.set_gripper_mode(self.api.Mode.position)
         self.driver.set_gripper_position(INITIAL_JAW_M, 1.0, blocking=True)
-        time.sleep(0.5)
+        time.sleep(INITIAL_SETTLE_S)
         command = self.initial_xyz.copy()
         alignment = {
             "target_recorded_proprio_xyz": self.initial_xyz.tolist(),
             "tolerance_mm": INITIAL_POSITION_TOLERANCE_M * 1000,
+            "correction_target_mm": INITIAL_CORRECTION_TARGET_M * 1000,
             "maximum_corrections": INITIAL_ALIGNMENT_CORRECTIONS,
             "maximum_compensation_mm": INITIAL_MAX_COMPENSATION_M * 1000,
             "corrections": [],
@@ -329,12 +335,13 @@ class TrossenArm:
                     }
                 )
             logging.info(
-                "Initial alignment after %d corrections: %.3f mm from desired XYZ (limit %.1f mm)",
+                "Initial alignment after %d corrections: %.3f mm from desired XYZ (corrects above %.1f mm, limit %.1f mm)",
                 attempt,
                 error * 1000,
+                INITIAL_CORRECTION_TARGET_M * 1000,
                 INITIAL_POSITION_TOLERANCE_M * 1000,
             )
-            if error <= INITIAL_POSITION_TOLERANCE_M:
+            if error <= INITIAL_CORRECTION_TARGET_M:
                 break
             if self.orientation_error_rad > np.deg2rad(2) or abs(state[6] - INITIAL_JAW_M) > 0.003:
                 break  # XYZ correction cannot repair an orientation or jaw error.
@@ -353,7 +360,7 @@ class TrossenArm:
                 blocking=True,
                 num_trajectory_check_samples=101,
             )
-            time.sleep(0.2)
+            time.sleep(INITIAL_SETTLE_S)
         return self.verify_initial_pose(state)
 
     def enable(self):

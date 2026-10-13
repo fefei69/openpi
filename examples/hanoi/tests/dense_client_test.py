@@ -285,3 +285,23 @@ def test_pi05_play_identity_keeps_its_own_prefix_and_family():
     r = dense_client.check_contract(identity, expected_export_sha256="selected", task="BBBB_to_AAAA", distance=7)
     assert r["policy_family"] == "pi05_play" and r["execution_prefix"] == 3 and r["play"]
     assert r["task"]["goal_board"] == "CCCB" and r["task_prompt"] == "Goal: peg A is empty, peg B holds ring 4, peg C holds rings 1, 2 and 3."
+
+
+def test_repeats_run_trials_in_a_row_and_pause_for_the_board_reset(monkeypatch):
+    statuses = iter(["task_solved", "budget_spent", "task_solved"])
+    calls, prompts = [], []
+    monkeypatch.setattr(dense_client, "run_trial", lambda config: (calls.append(config.task), {"status": next(statuses), "start_board": "AAAA"})[1])
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt))
+    dense_client.main(dense_client.Config(mode="replay", repeats=3, task="AAAA_to_CCCC"))
+    assert calls == ["AAAA_to_CCCC"] * 3 and len(prompts) == 2
+    assert prompts[0].startswith("Trial 1 of 3 done (task_solved). Put all four rings back on peg A, then press Enter for trial 2")
+    # An operator stop ends the series without a prompt; a single trial never prompts.
+    calls.clear(); prompts.clear()
+    monkeypatch.setattr(dense_client, "run_trial", lambda config: (calls.append(1), {"status": "operator_stop", "start_board": "CCCC"})[1])
+    dense_client.main(dense_client.Config(mode="replay", repeats=3))
+    assert calls == [1] and prompts == []
+    monkeypatch.setattr(dense_client, "run_trial", lambda config: (calls.append(1), {"status": "task_solved", "start_board": "CCCC"})[1])
+    dense_client.main(dense_client.Config(mode="replay", repeats=1))
+    assert calls == [1, 1] and prompts == []
+    with pytest.raises(ValueError, match="repeats"):
+        dense_client.main(dense_client.Config(mode="replay", repeats=0))

@@ -37,7 +37,8 @@ grasp. It then uses the selected rod-A setup pose:
    `desired_xyz - measured_xyz` to the previous command and move again. Allow at most **three corrections**;
    stop before any command whose cumulative compensation from the desired pose would exceed **5 mm**.
    Each correction is blocking, takes 4.208 seconds, and keeps the fixed rotation and driver trajectory checks.
-   Reject setup if final XYZ error exceeds 0.5 mm. Rotation must remain within **2 degrees**, and jaw within **3 mm**.
+   Reject setup if the XYZ error exceeds **1 mm** when verified again after the warm-up (0.5 mm until 2026-10-13: an
+   arrival that crept 0.17 mm during the warm-up failed it). Rotation must remain within **2 degrees**, and jaw within **3 mm**.
    Measured velocities are reported, but are not a pass/fail criterion for this pose test.
 5. Return to the six-zero-joint home pose, check home readback, and disconnect.
 
@@ -543,7 +544,12 @@ campaign target of 3 per task per policy (36 runs), solved count and success rat
 unscorable after an illegal stacking counts its peak, marked `*`), the move-quality counts and clean trials per case, what is
 still to run, and the per-trial rows. Aborted runs are listed but not counted. `./run_scoreboard.sh` rebuilds it by hand
 (`--since`, `--exclude <run>`, `--target`); `--no-update-scoreboard` on the client skips it; move a run folder out of
-`data/hanoi/deployment` to drop it for good. One-move trials (H1): `--distance 1` on a six-task server keeps the task prompt but makes the board one move along
+`data/hanoi/deployment` to drop it for good. Repeats: `--repeats 3` runs three trials of the same configuration in a row. After each trial the arm releases and
+returns to joint home as usual, the client waits for Enter while the rings are put back on the start peg by hand, and
+the next trial starts from scratch (home, start pose, alignment) as its own run folder. Ctrl-C at the prompt, an
+operator stop or a failure ends the series.
+
+One-move trials (H1): `--distance 1` on a six-task server keeps the task prompt but makes the board one move along
 the task's path the trial's goal, so the trial ends as soon as that move is made (reached or not; budget two moves, the
 arm protocol's rules). The six-task scoreboard keeps these in their own table and the chart fills its Expert data (H1)
 bars from them. `./run_plot_comparison.sh` draws the comparison bar chart
