@@ -96,9 +96,14 @@ def _case(rows: list[dict]) -> dict:
 
 
 def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> str:
-    by = {(f, t): [r for r in rows if r["family"] == f and r["task"] == t] for f, _ in FAMILIES for t in TASKS}
+    """The six-task page: the full tower (distance 15) tables, the one-move (H1, distance 1) table, and every trial."""
+    full = [r for r in rows if r["distance"] == 15]
+    one = [r for r in rows if r["distance"] == 1]
+    by = {(f, t): [r for r in full if r["family"] == f and r["task"] == t] for f, _ in FAMILIES for t in TASKS}
     cases = {k: _case(v) for k, v in by.items()}
-    totals = {f: _case([r for r in rows if r["family"] == f]) for f, _ in FAMILIES}
+    totals = {f: _case([r for r in full if r["family"] == f]) for f, _ in FAMILIES}
+    h1 = {(f, t): _case([r for r in one if r["family"] == f and r["task"] == t]) for f, _ in FAMILIES for t in TASKS}
+    h1_totals = {f: _case([r for r in one if r["family"] == f]) for f, _ in FAMILIES}
     done = sum(min(c["trials"], target) for c in cases.values())
     goal = target * len(TASKS) * len(FAMILIES)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -126,18 +131,32 @@ def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> 
             if not c["trials"]:
                 continue
             lines.append(f"| {n} | {t} | {c['trials']} | {c['moves']} | {c['optimal']} | {c['detour']} | {c['null']} | {c['illegal']} | {c['clean']} |")
+    lines += ["", "## One-move trials (H1)", "",
+              f"The task prompt as above, but the trial ends once the board is one move along the task's path (goal at distance 1): "
+              f"reached or not, budget 2 moves. Target {target} per task per policy ({target * len(TASKS)} per policy).", "",
+              "| Task | Goal board | " + " | ".join(f"{n} trials | {n} reached" for _, n in FAMILIES) + " |",
+              "|---|---|" + "---|" * (2 * len(FAMILIES))]
+    for t in TASKS + ("All six",):
+        cells = []
+        for f, _ in FAMILIES:
+            c = h1[(f, t)] if t in TASKS else h1_totals[f]
+            want = target if t in TASKS else target * len(TASKS)
+            cells += [f"{c['trials']} of {want}", f"{c['solved']} ({pct(c['rate'])})" if c["trials"] else ""]
+        lines.append(f"| {t} | {goal_at_distance(t, 1) if t in TASKS else ''} | " + " | ".join(cells) + " |")
     lines += ["", "## Still to run", ""]
     for f, n in FAMILIES:
         left = [f"{t} x{target - cases[(f, t)]['trials']}" for t in TASKS if cases[(f, t)]["trials"] < target]
         lines.append(f"- {n}: " + (", ".join(left) if left else "done"))
+        left = [f"{t} x{target - h1[(f, t)]['trials']}" for t in TASKS if h1[(f, t)]["trials"] < target]
+        lines.append(f"- {n}, one move (H1): " + (", ".join(left) if left else "done"))
     for f, n in FAMILIES:
         fam = [r for r in rows if r["family"] == f]
         lines += ["", f"## {n} trials ({f})", ""]
         if not fam:
             lines.append("none yet")
             continue
-        lines += ["| # | date | task | run | status | moves (optimal / detour / null / illegal) | optimal prefix | progress | peak | solve time | reason |",
-                  "|---|---|---|---|---|---|---|---|---|---|---|"]
+        lines += ["| # | date | task | goal | run | status | moves (optimal / detour / null / illegal) | optimal prefix | progress | peak | solve time | reason |",
+                  "|---|---|---|---|---|---|---|---|---|---|---|---|"]
         k = 0
         for r in fam:
             if r["aborted"]:
@@ -145,7 +164,7 @@ def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> 
             k += 1
             prog = pct(r["progress"]) if r["progress"] is not None else pct(r["peak_progress"]) + "*"
             kinds = f"{r['moves']} ({r['optimal']} / {r['detour']} / {r['null']} / {r['illegal']})"
-            lines.append(f"| {k} | {r['date']} | {r['task']} | {r['run']} | {r['status']} | {kinds} | {r['optimal_prefix']} | {prog} | "
+            lines.append(f"| {k} | {r['date']} | {r['task']} | {r['goal_board']} | {r['run']} | {r['status']} | {kinds} | {r['optimal_prefix']} | {prog} | "
                          f"{pct(r['peak_progress'])} | {r['solve_time_s'] or ''} | {r['reason']} |")
         aborted = [r for r in fam if r["aborted"]]
         if aborted:

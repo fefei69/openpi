@@ -543,7 +543,10 @@ campaign target of 3 per task per policy (36 runs), solved count and success rat
 unscorable after an illegal stacking counts its peak, marked `*`), the move-quality counts and clean trials per case, what is
 still to run, and the per-trial rows. Aborted runs are listed but not counted. `./run_scoreboard.sh` rebuilds it by hand
 (`--since`, `--exclude <run>`, `--target`); `--no-update-scoreboard` on the client skips it; move a run folder out of
-`data/hanoi/deployment` to drop it for good. `./run_plot_comparison.sh` draws the comparison bar chart
+`data/hanoi/deployment` to drop it for good. One-move trials (H1): `--distance 1` on a six-task server keeps the task prompt but makes the board one move along
+the task's path the trial's goal, so the trial ends as soon as that move is made (reached or not; budget two moves, the
+arm protocol's rules). The six-task scoreboard keeps these in their own table and the chart fills its Expert data (H1)
+bars from them. `./run_plot_comparison.sh` draws the comparison bar chart
 (`exp_vid/six_task_progress.png` and `.pdf`): average task progress per method over the six tasks, keeping the best 3 trials
 per task (`--best`), with the methods and conditions not yet tested as hatched grey placeholders
 ([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`). Each measured bar carries an error bar of one standard

@@ -43,9 +43,11 @@ METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("Ours", "Ours", "ours", "#1baf7a"))
 GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
-# The policy family behind a method in each group, from the run logs: six-task models on the optimal demonstrations
-# (the full 15-move tower, H15), play models on play. The one-move setting (H1) has no run logs here.
-FAMILY_SUFFIX = {"Expert data (H15)": "_multitask", "Non-expert data": "_play"}
+# The policy family suffix and goal distance behind a method in each group, from the run logs: six-task models on the
+# optimal demonstrations for the full 15-move tower (H15) and for the one-move trials (H1, goal at distance 1), play
+# models on play for the full tower.
+GROUP_SOURCE = {"Expert data (H1)": ("_multitask", 1), "Expert data (H15)": ("_multitask", 15), "Non-expert data": ("_play", 15)}
+FAMILY_SUFFIX = {group: suffix for group, (suffix, _) in GROUP_SOURCE.items()}
 # Per-trial scores from another agent's logs, entered by hand: group -> method index -> [(task, progress in percent)].
 # Ours (user, 2026-10-08). Expert data (H15): the 18-trial campaign of 2026-10-07 with fixed settings, including its one
 # 93.3, and not the extra trial run after it. Non-expert data: the final play runner of 2026-10-05/06, with the three
@@ -81,7 +83,8 @@ def hand_rows(hand_trials=None) -> list[dict]:
     for group, methods in (HAND_TRIALS if hand_trials is None else hand_trials).items():
         for k, trials in methods.items():
             family = METHODS[k][2] + FAMILY_SUFFIX[group]
-            rows += [{"family": family, "task": task, "progress": score / 100, "peak_progress": score / 100, "aborted": False, "hand_entered": True}
+            rows += [{"family": family, "task": task, "progress": score / 100, "peak_progress": score / 100, "aborted": False, "hand_entered": True,
+                      "distance": GROUP_SOURCE[group][1]}
                      for task, score in trials]
     return rows
 
@@ -105,9 +108,10 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
     for group in GROUPS:
         for k, (_, _, stem, _) in enumerate(METHODS):
             family = stem + FAMILY_SUFFIX[group] if stem and group in FAMILY_SUFFIX else None
-            mean = scoreboard.average_progress(rows, family, best) if family else None
+            group_rows = [r for r in rows if r.get("distance", 15) == GROUP_SOURCE[group][1]]
+            mean = scoreboard.average_progress(group_rows, family, best) if family else None
             if mean is not None:
-                picked = scoreboard.best_trials(rows, family, best)
+                picked = scoreboard.best_trials(group_rows, family, best)
                 scores = [100 * x for v in picked.values() for x in v]
                 spread = dict(NO_SPREAD)
                 if len(scores) > 1:
@@ -274,7 +278,7 @@ def main():
             stats = "" if v["sd"] is None else (f", standard deviation {v['sd']:.1f} (variance {v['sd'] ** 2:.0f}), standard error {v['error']:.1f}, "
                                                  f"range {v['low']:.0f} to {v['high']:.0f}, quartiles {v['q1']:.0f} / {v['median']:.0f} / {v['q3']:.0f}")
             print(f"{name} ({family}): mean {v['value']:.1f}% over {v['trials']} trials{stats}" + ("" if v["complete"] else " (incomplete)"))
-            for task, scores in scoreboard.best_trials(rows, family, args.best).items():
+            for task, scores in scoreboard.best_trials([r for r in rows if r.get("distance", 15) == GROUP_SOURCE[group][1]], family, args.best).items():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
         else:
             print(f"{name}: {v['value']:.0f}% ({v['kind']}" + (f", {v['tasks']} task cases" if v["kind"] == "reported" else "") + ")")

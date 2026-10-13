@@ -147,15 +147,17 @@ class Config:
     start: Literal["auto", "episode_start", "above_peg_a", "above_peg_b", "above_peg_c"] = "auto"
     # Task for a six-task (contract six) server, by direction, e.g. CCCC_to_AAAA; ignored by single-task servers.
     task: str = "AAAA_to_CCCC"
-    # Play-trained (contract seven) servers take a goal board. The trial's goal is the board this many moves along the
-    # task's shortest path from its full tower: 15 is the full tower move, 1, 3 and 7 are the arm protocol's shorter goals.
+    # The trial's goal is the board this many moves along the task's shortest path from its full tower: 15 is the full
+    # tower move, 1, 3 and 7 are the arm protocol's shorter goals. A play-trained (contract seven) server is sent that
+    # board's sentence; a six-task server keeps its task prompt and the shorter goal only ends the trial earlier
+    # (distance 1 is the one-move setting, H1).
     distance: int = 15
     # final: the goal board's sentence for the whole trial (protocol A, the comparison). next: after every move, the
     # sentence of the next board on the shortest path from the tracked board to the goal (protocol C, diagnostic only).
     goal_protocol: Literal["final", "next"] = "final"
     # duration: run for --duration-s, ending early when solved. arm_protocol: end at the goal board, after twice the
     # goal distance in moves, on a ring placed on a smaller one, a dropped ring, or --stall-s without a completed move;
-    # --duration-s is not used. auto: arm_protocol for a live run against a play server, duration otherwise.
+    # --duration-s is not used. auto: arm_protocol for a live run against a play server or with a shorter goal, duration otherwise.
     trial_rules: Literal["auto", "duration", "arm_protocol"] = "auto"
     stall_s: float = 60.0
     max_start_joint_error_rad: float = 0.05
@@ -209,8 +211,9 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None, task:
         tasks = {t["direction"]: t for t in contract.get("tasks", []) if isinstance(t, dict)}
         if task not in tasks or not tasks[task].get("prompt") or tasks[task]["prompt"] not in (identity.get("prompts") or []):
             raise ValueError(f"Task {task!r} is not one of the server's tasks {sorted(tasks)}")
-        resolved = {k: tasks[task][k] for k in ("index", "direction", "start_peg", "goal_peg")}
-        prompt = tasks[task]["prompt"]
+        resolved = {**{k: tasks[task][k] for k in ("index", "direction", "start_peg", "goal_peg")},
+                    "start_board": task[0] * 4, "goal_board": goal_at_distance(task, distance), "distance": distance}
+        prompt = tasks[task]["prompt"]  # the task prompt whatever the distance: a shorter goal only ends the trial earlier
     elif identity_key == "hanoi_play":
         goal_board = goal_at_distance(task, distance)  # refuses an unknown task or distance
         sentences = identity.get("prompts")
@@ -223,8 +226,8 @@ def check_contract(metadata, *, expected_export_sha256: str | None = None, task:
         if identity.get("prompt") != PROMPT:
             raise ValueError("Server prompt is not the trained AAAA-to-CCCC instruction")
         resolved, prompt = dict(SINGLE_TASK), PROMPT
-    if identity_key != "hanoi_play" and distance != 15:
-        raise ValueError("--distance needs a play-trained server (goal boards); this server runs full tower moves only")
+    if identity_key == "hanoi_dense" and distance != 15:
+        raise ValueError("--distance needs a six-task or play-trained server; this single-task server runs the full tower only")
     if expected_export_sha256 == "selected":
         expected_export_sha256 = SELECTED_EXPORTS.get(identity.get("config_name"))
         if expected_export_sha256 is None:
@@ -414,7 +417,7 @@ def main(config: Config):
         play = bool(policy.identity.get("play"))
         if config.goal_protocol == "next" and not play:
             raise ValueError("--goal-protocol next needs a play-trained server (goal board sentences)")
-        arm_protocol = live and (config.trial_rules == "arm_protocol" or (config.trial_rules == "auto" and play))
+        arm_protocol = live and (config.trial_rules == "arm_protocol" or (config.trial_rules == "auto" and (play or config.distance < 15)))
         move_budget = 2 * tracker.total if arm_protocol else None
         if config.goal_protocol == "next":
             policy.prompt = policy.board_prompts[board_string(next_board(tracker.stacks, tracker.goal))]

@@ -1,8 +1,17 @@
 from examples.hanoi.deployment import plot_comparison
 
 
-def row(family, task, progress):
-    return {"family": family, "task": task, "progress": progress, "peak_progress": progress, "aborted": False}
+def row(family, task, progress, distance=15):
+    return {"family": family, "task": task, "progress": progress, "peak_progress": progress, "aborted": False, "distance": distance}
+
+
+def test_one_move_trials_fill_the_h1_group_only():
+    rows = [row("cosmos_multitask", "AAAA_to_CCCC", 1.0), row("cosmos_multitask", "AAAA_to_CCCC", 1.0, distance=1),
+            row("cosmos_multitask", "AAAA_to_CCCC", 0.0, distance=1)]
+    vals = plot_comparison.values(rows, best=3, reported={}, placeholders={"Expert data (H1)": {1: 100}})
+    assert (vals[("Expert data (H1)", 0)]["kind"], vals[("Expert data (H1)", 0)]["value"], vals[("Expert data (H1)", 0)]["trials"]) == ("measured", 50.0, 2)
+    assert (vals[("Expert data (H15)", 0)]["kind"], vals[("Expert data (H15)", 0)]["value"], vals[("Expert data (H15)", 0)]["trials"]) == ("measured", 100.0, 1)
+    assert vals[("Expert data (H1)", 1)]["kind"] == "placeholder"
 
 
 def test_values_prefer_measured_then_reported_then_placeholder():

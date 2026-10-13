@@ -253,8 +253,21 @@ def test_play_identity_resolves_a_goal_board_and_its_sentence():
     with pytest.raises(ValueError, match="selected checkpoint"):
         dense_client.check_contract(play_metadata(export_sha256="0" * 64), expected_export_sha256="selected", task="AAAA_to_CCCC")
     # Intermediate goals exist only for play servers.
-    with pytest.raises(ValueError, match="play-trained server"):
+    with pytest.raises(ValueError, match="single-task server"):
         dense_client.check_contract(metadata(), expected_export_sha256="selected", distance=3)
+
+
+def test_six_task_identity_takes_a_shorter_goal_without_changing_the_prompt():
+    prompts = [f"Move all four rings from peg {s} to peg {g} following Tower of Hanoi rules. The goal is peg {g}." for s, g in (("A", "C"), ("C", "A"))]
+    tasks = [{"index": 0, "direction": "AAAA_to_CCCC", "start_peg": "A", "goal_peg": "C", "prompt": prompts[0]},
+             {"index": 1, "direction": "CCCC_to_AAAA", "start_peg": "C", "goal_peg": "A", "prompt": prompts[1]}]
+    identity = {"contract": {**dense_client.EXPECTED_CONTRACT, "version": 6, "action_horizon": 16, "execution_prefix": 3, "tasks": tasks},
+                "prompts": prompts, "prompt": None, "config_name": "pi05_hanoi_multitask_v6_cycle2",
+                "export_sha256": dense_client.SELECTED_EXPORTS["pi05_hanoi_multitask_v6_cycle2"], "gpu": "test"}
+    r = dense_client.check_contract({"hanoi_multitask": identity}, expected_export_sha256="selected", task="CCCC_to_AAAA", distance=1)
+    assert r["task_prompt"] == prompts[1] and (r["task"]["goal_board"], r["task"]["start_board"], r["task"]["distance"]) == ("BCCC", "CCCC", 1)
+    full = dense_client.check_contract({"hanoi_multitask": identity}, expected_export_sha256="selected", task="CCCC_to_AAAA")
+    assert full["task"]["goal_board"] == "AAAA" and full["task"]["distance"] == 15
 
 
 def test_arm_protocol_stops_release_and_home():

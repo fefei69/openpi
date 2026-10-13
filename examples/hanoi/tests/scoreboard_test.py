@@ -103,6 +103,21 @@ def test_play_scoreboard_follows_the_arm_protocol_pairs(tmp_path):
     assert written == [dest / "six_task_scoreboard.md", dest / "play_scoreboard.md"] and (dest / "play_trials.csv").exists()
 
 
+def test_one_move_trials_have_their_own_table(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    solution = [(s, d) for _, s, d in progress.optimal_solution(4, "A", "C")]
+    write_run(runs, "dense_live_1", "cosmos_multitask", "AAAA_to_CCCC", solution, status="task_solved")
+    write_run(runs, "dense_live_2", "cosmos_multitask", "AAAA_to_CCCC", solution[:1], status="task_solved", goal_board="BAAA")
+    write_run(runs, "dense_live_3", "cosmos_multitask", "AAAA_to_CCCC", [("A", "C")], status="budget_spent", goal_board="BAAA")
+    rows = scoreboard.collect(runs)
+    assert [(r["distance"], r["solved"]) for r in rows] == [(15, True), (1, True), (1, False)]
+    text = scoreboard.render(rows, target=3)
+    assert "| AAAA_to_CCCC | 1 of 3 | 1 (100%) | 100% |" in text          # the full-tower table counts only distance 15
+    assert "| AAAA_to_CCCC | BAAA | 2 of 3 | 1 (50%) | 0 of 3 |  |" in text  # the one-move table
+    assert "- Cosmos, one move (H1): AAAA_to_CCCC x1, CCCC_to_AAAA x3" in text
+
+
 def test_runs_are_found_under_family_folders(tmp_path):
     runs = tmp_path / "runs"
     solution = [(s, d) for _, s, d in progress.optimal_solution(4, "A", "C")]
