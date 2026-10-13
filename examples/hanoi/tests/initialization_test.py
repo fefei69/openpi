@@ -78,7 +78,8 @@ def test_pose_test_records_target_readback_then_returns_home(tmp_path, robot):
     assert result["initial_proprio_alignment"]["corrections"] == []
     assert result["initial_proprio_alignment"]["passed"] is True
     assert result["initial_proprio_alignment"]["final_error_mm"] <= 0.5
-    assert clock.now == pytest.approx(6.4 + 0.2 + 4.208 + 1.0 + 0.5 + 6.4 + 0.2)
+    home, travel = 3.2 * hardware.ARM_TRAVEL_TIME_SCALE, 2.104 * hardware.ARM_TRAVEL_TIME_SCALE
+    assert clock.now == pytest.approx(home + 0.2 + travel + 1.0 + 0.5 + home + 0.2)
     assert [call[0] for call in driver.method_calls if call[0].startswith("set_")] == [
         "set_arm_modes",
         "set_arm_positions",
@@ -88,9 +89,9 @@ def test_pose_test_records_target_readback_then_returns_home(tmp_path, robot):
         "set_arm_positions",
     ]
     assert driver.set_arm_positions.call_args_list[-1].args[0] == [0.0] * 6
-    assert driver.set_arm_positions.call_args_list[-1].args[1] == 6.4
+    assert driver.set_arm_positions.call_args_list[-1].args[1] == pytest.approx(3.2 * hardware.ARM_TRAVEL_TIME_SCALE)
     assert driver.set_arm_positions.call_args_list[-1].kwargs["blocking"] is True
-    assert driver.set_cartesian_positions.call_args.kwargs["goal_time"] == 4.208
+    assert driver.set_cartesian_positions.call_args.kwargs["goal_time"] == pytest.approx(2.104 * hardware.ARM_TRAVEL_TIME_SCALE)
     assert driver.set_cartesian_positions.call_args.kwargs["blocking"] is True
     assert driver.set_gripper_position.call_args.kwargs["blocking"] is True
     driver.cleanup.assert_called_once()
@@ -130,7 +131,7 @@ def test_alignment_compensates_readback_bias_only_when_needed(tmp_path, robot, o
     for call in driver.set_cartesian_positions.call_args_list:
         np.testing.assert_array_equal(call.args[0][3:], hardware.INITIAL_ROTVEC)
         assert call.kwargs["blocking"] is True
-        assert call.kwargs["goal_time"] == 4.208
+        assert call.kwargs["goal_time"] == pytest.approx(2.104 * hardware.ARM_TRAVEL_TIME_SCALE)
         assert call.kwargs["num_trajectory_check_samples"] == 101
     if expected_corrections:
         corrected = driver.set_cartesian_positions.call_args.args[0][:3]
@@ -645,7 +646,7 @@ def test_startup_releases_previous_rod_grip_before_homing(robot):
     calls = [call for call in driver.method_calls if call[0].startswith("set_")]
     opened = next(i for i, call in enumerate(calls) if call[0] == "set_gripper_position")
     setup = next(i for i, call in enumerate(calls) if call[0] == "set_cartesian_positions")
-    homed = next(i for i, call in enumerate(calls) if call[0] == "set_arm_positions" and call.args[1] == 6.4)
+    homed = next(i for i, call in enumerate(calls) if call[0] == "set_arm_positions" and call.args[1] == pytest.approx(3.2 * hardware.ARM_TRAVEL_TIME_SCALE))
     assert opened < homed < setup
     assert driver.set_cartesian_positions.call_count == 1  # Setup only; no recovery lift.
     np.testing.assert_allclose(arm.read()[:3], hardware.INITIAL_XYZ)

@@ -9,7 +9,11 @@ import cv2
 import numpy as np
 from openpi_client import hanoi
 
-from examples.hanoi.deployment.execution import ARM_MOTION_TIME_SCALE
+from examples.hanoi.deployment.execution import ARM_MOTION_TIME_SCALE  # noqa: F401  (the waypoint executor's segment pace)
+
+# Travel moves outside policy control (joint home, the move to the start pose, the XYZ correction): the driver's
+# nominal durations times this. It was 2 (half speed) until 2026-10-13; 1.4 is 30% less time at the user's request.
+ARM_TRAVEL_TIME_SCALE = 1.4
 from examples.hanoi.deployment.execution import GRIPPER_CLOSE_S
 from examples.hanoi.deployment.execution import LIMITS
 from examples.hanoi.deployment.execution import Command
@@ -267,7 +271,7 @@ class TrossenArm:
         """Return to the recorder's zero-joint home and check the result."""
         self.read(require_orientation=False)
         self.enable()
-        self.driver.set_arm_positions(HOME_JOINTS.tolist(), 3.2 * ARM_MOTION_TIME_SCALE, blocking=True)
+        self.driver.set_arm_positions(HOME_JOINTS.tolist(), 3.2 * ARM_TRAVEL_TIME_SCALE, blocking=True)
         time.sleep(0.2)
         self.read(require_orientation=False)
         joints = np.asarray(self.driver.get_arm_positions(), dtype=float)
@@ -283,7 +287,7 @@ class TrossenArm:
         """Home, move to the start pose, open the jaw, and correct XYZ to within 0.5 mm."""
         self.last_initial_pose_report = None
         self.initial_proprio_alignment = None
-        logging.info("Arm travel uses %sx durations (half speed)", ARM_MOTION_TIME_SCALE)
+        logging.info("Arm travel uses %.1fx the driver's nominal durations", ARM_TRAVEL_TIME_SCALE)
         state = self.read(require_orientation=False)
         if state[6] < INITIAL_JAW_M - 0.003:
             # Release a possible rod grip before joint homing on a new launch.
@@ -292,7 +296,7 @@ class TrossenArm:
         self.driver.set_cartesian_positions(
             np.r_[self.initial_xyz, self.orientation].tolist(),
             self.api.InterpolationSpace.cartesian,
-            goal_time=2.104 * ARM_MOTION_TIME_SCALE,
+            goal_time=2.104 * ARM_TRAVEL_TIME_SCALE,
             blocking=True,
             num_trajectory_check_samples=101,
         )
@@ -345,7 +349,7 @@ class TrossenArm:
             self.driver.set_cartesian_positions(
                 np.r_[command, self.orientation].tolist(),
                 self.api.InterpolationSpace.cartesian,
-                goal_time=2.104 * ARM_MOTION_TIME_SCALE,
+                goal_time=2.104 * ARM_TRAVEL_TIME_SCALE,
                 blocking=True,
                 num_trajectory_check_samples=101,
             )

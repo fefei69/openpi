@@ -53,6 +53,7 @@ from examples.hanoi.deployment.hardware import MissedGraspError
 from examples.hanoi.deployment.hardware import RosCamera
 from examples.hanoi.deployment.hardware import TrossenArm
 from examples.hanoi.deployment.hardware import check_grasp
+from examples.hanoi.deployment.hardware import ARM_TRAVEL_TIME_SCALE
 from examples.hanoi.deployment.hardware import validate_trajectory
 from examples.hanoi.deployment.paths import RUNS_DIR
 from examples.hanoi.deployment.paths import require_available
@@ -172,9 +173,10 @@ class Config:
     stop_when_solved: bool = True
     # Record a ROS 2 bag of the full-frame camera stream for the whole run, from robot initialization
     # to the return home, under <run>/camera_bag (mcap). The camera publishes 640 x 480 rgb8 at 60 Hz:
-    # 55 MB/s raw, about 24 MB/s with the default zstd_fast preset (7 GB for five minutes). Live and
+    # 55 MB/s raw, about 24 MB/s with the default zstd_fast preset (7 GB for five minutes), written to the run
+    # folder on the experiment drive. On by default since 2026-10-13 (--no-record-bag turns it off). Live and
     # shadow modes only; the recorder is a separate process and does not touch the control loop.
-    record_bag: bool = False
+    record_bag: bool = True
     bag_topics: tuple[str, ...] = ()  # default: the camera image topic and its camera_info
     bag_storage_preset: Literal["none", "fastwrite", "zstd_fast", "zstd_small"] = "zstd_fast"
 
@@ -741,6 +743,7 @@ def main(config: Config):
             "config_name": policy.identity.get("config_name") if policy is not None else None,
             "action_horizon": policy.horizon if policy is not None else None,
             "server_export_sha256": policy.identity.get("export_sha256") if policy is not None else None,
+            "arm_travel_time_scale": ARM_TRAVEL_TIME_SCALE,
             "gripper_close_s": GRIPPER_CLOSE_S,
             "gripper_close_settle_s": GRIPPER_CLOSE_SETTLE_S,
             "return_home_requested": return_home_on_stop,

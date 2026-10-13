@@ -583,7 +583,8 @@ full-tower trials. Serve the Cosmos play export from cosmos-policy with
 ./run_dense_client.sh --server ws://127.0.0.1:8001 --mode live --task AAAA_to_CCCC --goal-protocol next     # C, distance 15
 ```
 
-Camera recording: `--record-bag` on either client starts `ros2 bag record` of the full-frame camera stream and its
+Camera recording: the dense client records a bag by default (`--no-record-bag` turns it off); `--record-bag` on the
+waypoint client does the same. It starts `ros2 bag record` of the full-frame camera stream and its
 camera_info into `<run>/camera_bag` (mcap, zstd_fast by default) for the whole run, robot initialization through the
 return home, and writes `bag_started`/`bag_stopped` events and a `camera_bag` summary entry with duration, size and
 how the recorder closed. The camera publishes 640 x 480 rgb8 at 60 Hz: about 24 MB/s with zstd_fast (7 GB for five
