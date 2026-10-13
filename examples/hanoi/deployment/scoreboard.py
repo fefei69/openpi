@@ -1,7 +1,8 @@
 """Six-task campaign scoreboard: success rate, progress and move quality per task per policy, kept up to date.
 
 Every dense client run of a six-task policy (Cosmos or pi0.5) regenerates ``exp_vid/six_task_scoreboard.md`` (and
-``six_task_trials.csv``) in both checkouts from all recorded runs under ``data/hanoi/deployment``; run it by hand with
+``six_task_trials.csv``) in both checkouts from all recorded runs under the experiment drive's ``runs/`` folder (any
+depth; see ``paths.py``); run it by hand with
 ``./run_scoreboard.sh`` (``--since YYYY-MM-DD``, ``--exclude <run>`` to leave runs out, ``--target`` trials per case).
 
 * Trials per task per policy against the campaign target (3 each: 6 tasks x 3 x 2 policies = 36 runs), solved count and
@@ -10,7 +11,7 @@ Every dense client run of a six-task policy (Cosmos or pi0.5) regenerates ``exp_
 * Move quality: how many moves were optimal (on a shortest path), detours (legal, off it), null (put back on the same
   peg) or illegal (larger ring onto a smaller one), and how many trials were clean (every move optimal).
 * Runs that ended before the policy commanded anything (no camera frame, server down) are listed but not counted.
-  To leave a run out for good, move its folder out of ``data/hanoi/deployment``.
+  To leave a run out for good, move its folder out of the drive's ``runs/`` tree.
 
 The play-trained policies (goal board sentences) get their own page, ``exp_vid/play_scoreboard.md`` and
 ``play_trials.csv``, laid out by the arm protocol (``docs/hanoi_play_arm_protocol.md`` in cosmos-policy): protocol A
@@ -27,13 +28,13 @@ from pathlib import Path
 
 import numpy as np
 
+from examples.hanoi.deployment.paths import RUNS_DIR, run_dirs
 from examples.hanoi.deployment.progress import DIRECTIONS, goal_at_distance
 from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT, trial_row
 
 TASKS = DIRECTIONS
 FAMILIES = (("cosmos_multitask", "Cosmos"), ("pi05_multitask", "pi0.5"))
 TARGET = 3
-RUNS_DIR = OPENPI_ROOT / "data/hanoi/deployment"
 FILENAME = "six_task_scoreboard.md"
 PLAY_FILENAME = "play_scoreboard.md"
 PLAY_NAMES = {"cosmos_play": "Cosmos Policy (play)", "pi05_play": "pi0.5 (play)"}
@@ -49,8 +50,8 @@ def collect(runs_dir: Path = RUNS_DIR, since: str | None = None, exclude=(), pla
     """Trial rows for every six-task run (or, with ``play``, every play-policy run), oldest first."""
     cutoff = datetime.datetime.strptime(since, "%Y-%m-%d").timestamp() if since else 0
     rows = []
-    for run in sorted(Path(runs_dir).glob("*_live_*")):
-        if run.name in exclude or not (run / "summary.json").exists() or run.stat().st_mtime < cutoff:
+    for run in run_dirs(runs_dir):
+        if "_live_" not in run.name or run.name in exclude or run.stat().st_mtime < cutoff:
             continue
         summary = json.loads((run / "summary.json").read_text())
         family = summary.get("policy_family") or ""

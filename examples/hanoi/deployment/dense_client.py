@@ -54,6 +54,8 @@ from examples.hanoi.deployment.hardware import RosCamera
 from examples.hanoi.deployment.hardware import TrossenArm
 from examples.hanoi.deployment.hardware import check_grasp
 from examples.hanoi.deployment.hardware import validate_trajectory
+from examples.hanoi.deployment.paths import RUNS_DIR
+from examples.hanoi.deployment.paths import require_available
 from examples.hanoi.deployment.progress import BoardTracker
 from examples.hanoi.deployment.progress import DIRECTIONS
 from examples.hanoi.deployment.progress import board_string
@@ -114,7 +116,8 @@ class Config:
     # Raw single-episode extract (pixels, joint_positions, proprio, reference_pose, image timing).
     episode: Path = Path("../cosmos-policy/data/hanoi_cosmos/exports_local/hanoi_episode_040.h5")
     start_row: int = 0
-    output: Path = Path("data/hanoi/deployment")
+    # Root of the run folders: the experiment drive. A run is written to <output>/<policy family>/dense_<mode>_<ns>.
+    output: Path = RUNS_DIR
     robot_ip: str = "192.168.1.3"
     camera_topic: str = hanoi.CONTRACT["rgb_topic"]
     # Bounds derived from the waypoint_v4 labels; the dense reference paths lie inside the same box.
@@ -355,10 +358,9 @@ def main(config: Config):
     live = config.mode == "live"
     if live and bounds is None:
         raise ValueError("Live motion requires --workspace with XYZ bounds")
-    output = config.output / f"dense_{config.mode}_{time.time_ns()}"
-    output.mkdir(parents=True, exist_ok=False)
-    (output / "config.json").write_text(json.dumps(dataclasses.asdict(config), default=str, indent=2) + "\n")
-    events = (output / "events.jsonl").open("w")
+    if not require_available(config.output).is_dir():
+        raise FileNotFoundError(f"Run root {config.output} does not exist")
+    output = events = None  # created once the server has said which policy family this run belongs to
     bag = None
     arm = camera = worker = episode = policy = None
     counts = {"ticks": 0, "predictions": 0, "accepted_predictions": 0, "segments": 0, "stretched_segments": 0,
@@ -378,6 +380,8 @@ def main(config: Config):
     previous_sigint = signal.getsignal(signal.SIGINT)
 
     def log(event, **fields):
+        if events is None:  # nothing to log into before the run folder exists
+            return
         events.write(json.dumps({"event": event, "monotonic_s": time.monotonic(), **fields}) + "\n")
         events.flush()
 
@@ -393,6 +397,10 @@ def main(config: Config):
                                       warmup_timeout_s=config.warmup_timeout_s,
                                       expected_export_sha256=config.expected_export_sha256 or None, task=config.task,
                                       distance=config.distance)
+        output = config.output / policy.identity["policy_family"] / f"dense_{config.mode}_{time.time_ns()}"
+        output.mkdir(parents=True, exist_ok=False)
+        (output / "config.json").write_text(json.dumps(dataclasses.asdict(config), default=str, indent=2) + "\n")
+        events = (output / "events.jsonl").open("w")
         (output / "server_metadata.json").write_text(json.dumps(policy.metadata, indent=2, default=str) + "\n")
         task = policy.task
         logging.info("Server: %s (%d-step chunks, prefix %d), export %s on %s; task %s (%s -> %s)", policy.identity.get("config_name"),
@@ -757,16 +765,17 @@ def main(config: Config):
         alignment = getattr(arm, "initial_proprio_alignment", None)
         if isinstance(alignment, dict):
             summary["initial_proprio_alignment"] = alignment
-        (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        if config.update_scoreboard and (summary.get("policy_family") or "").endswith(("multitask", "play")):
-            try:
-                from examples.hanoi.deployment import scoreboard
+        if output is not None:
+            (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+            if config.update_scoreboard and (summary.get("policy_family") or "").endswith(("multitask", "play")):
+                try:
+                    from examples.hanoi.deployment import scoreboard
 
-                for path in scoreboard.update(after=output.name):
-                    logging.info("Scoreboard updated: %s", path)
-            except Exception as exc:  # never let the scoreboard fail a run
-                log("scoreboard_failed", error=repr(exc))
-        events.close()
+                    for path in scoreboard.update(after=output.name):
+                        logging.info("Scoreboard updated: %s", path)
+                except Exception as exc:  # never let the scoreboard fail a run
+                    log("scoreboard_failed", error=repr(exc))
+            events.close()
         signal.signal(signal.SIGINT, previous_sigint)
         logging.info("Result: %s", summary)
         if status == "cleanup_failed":

@@ -101,3 +101,15 @@ def test_play_scoreboard_follows_the_arm_protocol_pairs(tmp_path):
     dest = tmp_path / "exp_vid"
     written = scoreboard.update(runs_dir=runs, dests=[dest])
     assert written == [dest / "six_task_scoreboard.md", dest / "play_scoreboard.md"] and (dest / "play_trials.csv").exists()
+
+
+def test_runs_are_found_under_family_folders(tmp_path):
+    runs = tmp_path / "runs"
+    solution = [(s, d) for _, s, d in progress.optimal_solution(4, "A", "C")]
+    (runs / "cosmos_multitask").mkdir(parents=True)
+    (runs / "pi05_multitask").mkdir(parents=True)
+    write_run(runs / "cosmos_multitask", "dense_live_1", "cosmos_multitask", "AAAA_to_CCCC", solution, status="task_solved")
+    write_run(runs / "pi05_multitask", "dense_live_2", "pi05_multitask", "AAAA_to_CCCC", solution[:3])
+    write_run(runs / "pi05_multitask", "dense_replay_3", "pi05_multitask", "AAAA_to_CCCC", solution)  # replays never count
+    rows = scoreboard.collect(runs)
+    assert [(r["run"], r["family"], r["solved"]) for r in rows] == [("dense_live_1", "cosmos_multitask", True), ("dense_live_2", "pi05_multitask", False)]

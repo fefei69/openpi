@@ -1,6 +1,6 @@
 """Progress table over a series of trials (runs), not a binary success count.
 
-Selects runs under ``data/hanoi/deployment`` by ``--tag`` (the client's ``--tag``), ``--family``
+Selects runs under the experiment drive's ``runs/`` folder (any depth) by ``--tag`` (the client's ``--tag``), ``--family``
 (``cosmos_dense``, ``pi05_dense``), ``--config`` and/or ``--since``, or takes run directories directly,
 and writes ``exp_vid/<name>/trials.md`` and ``trials.csv`` in the family's checkout. Per trial:
 
@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
+from examples.hanoi.deployment.paths import run_dirs
 from examples.hanoi.deployment.progress import reconstruct
 
 OPENPI_ROOT = Path(__file__).resolve().parents[3]
@@ -85,8 +86,8 @@ def main():
     runs = list(args.runs)
     if not runs:
         since = datetime.datetime.strptime(args.since, "%Y-%m-%d").timestamp() if args.since else 0
-        for run in sorted((OPENPI_ROOT / "data/hanoi/deployment").glob("*_live_*")):
-            if not (run / "summary.json").exists() or run.stat().st_mtime < since:
+        for run in run_dirs():
+            if "_live_" not in run.name or run.stat().st_mtime < since:
                 continue
             summary = json.loads((run / "summary.json").read_text())
             if args.tag and summary.get("tag") != args.tag:

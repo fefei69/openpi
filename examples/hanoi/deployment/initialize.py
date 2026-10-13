@@ -17,18 +17,20 @@ import tyro
 
 from examples.hanoi.deployment.hardware import INITIAL_XYZ
 from examples.hanoi.deployment.hardware import TrossenArm
+from examples.hanoi.deployment.paths import RUNS_DIR
+from examples.hanoi.deployment.paths import require_available
 
 
 @dataclasses.dataclass
 class Config:
     robot_ip: str = "192.168.1.3"
-    output: Path = Path("data/hanoi/deployment")
+    output: Path = RUNS_DIR / "initial_poses"
     start: Literal["rod_a", "cosmos_v4", "above_peg_a"] = "rod_a"
 
 
 def main(config: Config):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    config.output.mkdir(parents=True, exist_ok=True)
+    require_available(config.output).mkdir(parents=True, exist_ok=True)
     path = config.output / f"initial_pose_{time.time_ns()}.json"
     if config.start in ("cosmos_v4", "above_peg_a"):
         from examples.hanoi.deployment.cosmos_client import START_POSES

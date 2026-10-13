@@ -261,7 +261,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q \
   examples/hanoi/tests/execution_test.py src/openpi/policies/hanoi_policy_test.py
 ```
 
-Each run creates a new directory under `data/hanoi/deployment/` (override with `--output`), containing configuration,
+Each run creates a new directory on the experiment drive, `/media/cpw/T9/chungpang/q-wm_exp/runs/<policy family>/`
+(`$HANOI_EXPERIMENT_ROOT` overrides the root, `--output` the runs folder; the drive must be mounted, nothing is created
+in its place), containing configuration,
 server metadata, first observation/crop, tick/state/prediction/command/error events, and a summary. The JSONL records
 include predicted arrays and timings; `summary.json` distinguishes duration completion, operator stop, and failures.
 

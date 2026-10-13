@@ -41,6 +41,8 @@ from examples.hanoi.deployment.execution import GRIPPER_CLOSE_SETTLE_S
 from examples.hanoi.deployment.execution import RATE_HZ
 from examples.hanoi.deployment.execution import Command
 from examples.hanoi.deployment.execution import move_to_target
+from examples.hanoi.deployment.paths import RUNS_DIR
+from examples.hanoi.deployment.paths import require_available
 from examples.hanoi.deployment.hardware import INITIAL_JAW_M
 from examples.hanoi.deployment.hardware import MIN_GRASP_STROKE_M
 from examples.hanoi.deployment.hardware import MissedGraspError
@@ -129,7 +131,8 @@ class Config:
     replay_rows: tuple[int, ...] = ()
     replay_stride: int = 300
     start_row: int = 0
-    output: Path = Path("data/hanoi/deployment")
+    # Root of the run folders: the experiment drive; waypoint runs go under its cosmos_waypoint/ folder.
+    output: Path = RUNS_DIR / "cosmos_waypoint"
     robot_ip: str = "192.168.1.3"
     camera_topic: str = hanoi.CONTRACT["rgb_topic"]
     # Bounds derived from this policy's own training labels (see cosmos_workspace.json).
@@ -483,7 +486,7 @@ def main(config: Config):
             raise ValueError("Workspace needs finite XYZ minimum/maximum triples")
     if bounds is None:
         raise ValueError("All modes validate commands against --workspace XYZ bounds")
-    output = config.output / f"cosmos_{config.mode}_{time.time_ns()}"
+    output = require_available(config.output) / f"cosmos_{config.mode}_{time.time_ns()}"
     output.mkdir(parents=True, exist_ok=False)
     (output / "config.json").write_text(json.dumps(dataclasses.asdict(config), default=str, indent=2) + "\n")
     events = (output / "events.jsonl").open("w")
