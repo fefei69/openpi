@@ -209,7 +209,7 @@ def draw(vals: dict, note: str | None, spread: str = "se"):
         if v["sd"] is not None:
             top = spread_box(ax, x, v, spread)
             text += f" \u00b1 {fmt(v['error' if spread == 'se' else 'sd'])}"
-        ax.text(x, top + 2, text + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
+        ax.text(x, top + 2, text, ha="center", va="bottom",  # no incompleteness mark on the figure; the caption text carries the counts
                 fontsize=10 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
         middle = (centers[(group, 0)] + centers[(group, len(METHODS) - 1)]) / 2
@@ -258,8 +258,9 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     for group, names in uncounted.items():
         joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
         last.append(f"{group[0].upper()}{group[1:]}: {joined} reported without trial counts.")
-    if any(v["kind"] != "placeholder" and not v["complete"] for v in vals.values()):
-        last.append(f"* not yet all {cases} task cases with {best} trials each.")
+    partial = [label(key) for key, v in vals.items() if v["kind"] != "placeholder" and not v["complete"]]
+    if partial:
+        last.append(f"Not yet all {cases} task cases with {best} trials each: " + ", ".join(partial) + ".")
     if any(v["kind"] == "placeholder" for v in vals.values()):
         last.append("Hatched grey bars are placeholder values, not yet tested.")
     lines.append(" ".join(last))

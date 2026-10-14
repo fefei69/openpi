@@ -36,7 +36,7 @@ def test_values_prefer_measured_then_reported_then_placeholder():
     assert "standard error of the mean" in note and "standard deviation" not in note and "Trials: expert H15 Cosmos Policy 3." in note
     assert "mean \u00b1 1 standard deviation" in plot_comparison.footnote(vals, 3, "sd")
     assert "first to third quartile" in plot_comparison.footnote(vals, 3, "quartiles")
-    assert "Ours: 2 of 6 task cases so far (expert H15 data)." in note and "* not yet all 6 task cases with 3 trials each." in note
+    assert "Ours: 2 of 6 task cases so far (expert H15 data)." in note and "Not yet all 6 task cases with 3 trials each: expert H15 Cosmos Policy" in note
     assert "Ours: 18 trials on all 6 task cases (non-expert data)." in note
     h1 = vals[("Expert data (H1)", 0)]
     assert (h1["kind"], h1["value"], h1["tasks"], h1["complete"]) == ("reported", 100.0, None, True)  # no counts given: no star
