@@ -210,7 +210,7 @@ def draw(vals: dict, note: str | None, spread: str = "se"):
             top = spread_box(ax, x, v, spread)
             text += f" \u00b1 {fmt(v['error' if spread == 'se' else 'sd'])}"
         ax.text(x, top + 2, text + ("*" if real and not v["complete"] else ""), ha="center", va="bottom",
-                fontsize=11.5 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
+                fontsize=10 if v["sd"] is not None else 12.5, color=INK if real else MUTED)
     for g, group in enumerate(GROUPS):
         middle = (centers[(group, 0)] + centers[(group, len(METHODS) - 1)]) / 2
         ax.text(middle, -0.225, group, transform=ax.get_xaxis_transform(), ha="center", va="top", fontsize=13, color=INK)
