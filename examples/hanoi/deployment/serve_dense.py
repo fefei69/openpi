@@ -9,6 +9,7 @@ wrapper validates every reply, warms the model up before listening, and serves o
     ./run_dense_server.sh --config-name pi05_hanoi_dense_h16_aaaa_to_cccc   # 16-step variant
     ./run_dense_server.sh --config-name pi05_hanoi_multitask_v6_cycle2      # six tasks, task prompt required
     ./run_dense_server.sh --config-name pi05_hanoi_play_k5_cycle2           # play, goal board sentence required
+    ./run_dense_server.sh --config-name pi05_hanoi_expert6_h1_cycle2        # one-move expert model, same interface
     ./run_dense_client.sh --mode live --duration-s 180
 """
 
@@ -24,8 +25,16 @@ DEFAULT_EXPORTS = {
     "pi05_hanoi_dense_h16_aaaa_to_cccc": Path("checkpoints/pi05_hanoi_dense_h16_aaaa_to_cccc/hanoi_dense_h16_20260920/exports/29999"),
     "pi05_hanoi_multitask_v6_cycle2": Path("checkpoints/pi05_hanoi_multitask_v6_cycle2/hanoi_multitask_20260926_cycle2/exports/15999"),
     "pi05_hanoi_play_k5_cycle2": Path("checkpoints/pi05_hanoi_play_k5_cycle2/hanoi_play_20260930_cycle2/exports/31999"),
+    "pi05_hanoi_expert6_h1_cycle2": Path("checkpoints/pi05_hanoi_expert6_h1_cycle2/hanoi_expert6_h1_20261006_cycle2/exports/15999"),
 }
 IDENTITY_KEYS = {"hanoi_dense": "pi05_dense", "hanoi_multitask": "pi05_multitask", "hanoi_play": "pi05_play"}  # identity key -> family
+
+
+def family_of(identity_key: str, config_name: str) -> str:
+    """The policy family a run is filed under: the one-move expert model shares the play interface but is its own family."""
+    if identity_key == "hanoi_play" and "expert6_h1" in config_name:
+        return "pi05_h1"
+    return IDENTITY_KEYS[identity_key]
 
 
 class DensePolicy:
@@ -97,7 +106,7 @@ def main(config: Config):
     identity = metadata.get(key) if key else None
     if not isinstance(identity, dict) or identity.get("export_sha256") is None:
         raise RuntimeError("The checkpoint did not publish its hanoi_dense/hanoi_multitask/hanoi_play identity; check policy_config")
-    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind, "model": IDENTITY_KEYS[key]}
+    identity = {**identity, "num_steps": config.num_steps, "gpu": jax.devices()[0].device_kind, "model": family_of(key, config.config_name)}
     if key == "hanoi_play":  # board -> sentence, the form the client checks (the checkpoint lists boards and sentences in order)
         identity["prompts"] = dict(zip(identity["boards"], identity["prompts"], strict=True))
     metadata[key] = identity

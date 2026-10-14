@@ -34,6 +34,8 @@ from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT, tri
 
 TASKS = DIRECTIONS
 FAMILIES = (("cosmos_multitask", "Cosmos"), ("pi05_multitask", "pi0.5"))
+# The one-move expert models (first move of the six tasks, goal-sentence interface): one-move trials only.
+H1_FAMILIES = (("cosmos_h1", "Cosmos H1 model"), ("pi05_h1", "pi0.5 H1 model"))
 TARGET = 3
 FILENAME = "six_task_scoreboard.md"
 PLAY_FILENAME = "play_scoreboard.md"
@@ -55,7 +57,7 @@ def collect(runs_dir: Path = RUNS_DIR, since: str | None = None, exclude=(), pla
             continue
         summary = json.loads((run / "summary.json").read_text())
         family = summary.get("policy_family") or ""
-        if (not family.endswith("_play")) if play else (family not in dict(FAMILIES)):
+        if (not family.endswith("_play")) if play else (family not in dict(FAMILIES) and family not in dict(H1_FAMILIES)):
             continue
         rows.append(trial_row(run.resolve()))
     return rows
@@ -112,8 +114,9 @@ def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> 
     by = {(f, t): [r for r in full if r["family"] == f and r["task"] == t] for f, _ in FAMILIES for t in TASKS}
     cases = {k: _case(v) for k, v in by.items()}
     totals = {f: _case([r for r in full if r["family"] == f]) for f, _ in FAMILIES}
-    h1 = {(f, t): _case([r for r in one if r["family"] == f and r["task"] == t]) for f, _ in FAMILIES for t in TASKS}
-    h1_totals = {f: _case([r for r in one if r["family"] == f]) for f, _ in FAMILIES}
+    h1_families = FAMILIES + H1_FAMILIES  # six-task models cut after their first move, then the models trained on that move
+    h1 = {(f, t): _case([r for r in one if r["family"] == f and r["task"] == t]) for f, _ in h1_families for t in TASKS}
+    h1_totals = {f: _case([r for r in one if r["family"] == f]) for f, _ in h1_families}
     done = sum(min(c["trials"], target) for c in cases.values())
     goal = target * len(TASKS) * len(FAMILIES)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -142,13 +145,14 @@ def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> 
                 continue
             lines.append(f"| {n} | {t} | {c['trials']} | {c['moves']} | {c['optimal']} | {c['detour']} | {c['null']} | {c['illegal']} | {c['clean']} |")
     lines += ["", "## One-move trials (H1)", "",
-              f"The task prompt as above, but the trial ends once the board is one move along the task's path (goal at distance 1): "
-              f"reached or not, budget 2 moves. Target {target} per task per policy ({target * len(TASKS)} per policy).", "",
-              "| Task | Goal board | " + " | ".join(f"{n} trials | {n} reached" for _, n in FAMILIES) + " |",
-              "|---|---|" + "---|" * (2 * len(FAMILIES))]
+              f"The trial ends once the board is one move along the task's path (goal at distance 1): reached or not, budget 2 moves. "
+              f"The six-task models get their task prompt and are cut after the first move; the H1 models (trained on that first move) get "
+              f"the goal board's sentence. Target {target} per task per policy ({target * len(TASKS)} per policy).", "",
+              "| Task | Goal board | " + " | ".join(f"{n} trials | {n} reached" for _, n in h1_families) + " |",
+              "|---|---|" + "---|" * (2 * len(h1_families))]
     for t in TASKS + ("All six",):
         cells = []
-        for f, _ in FAMILIES:
+        for f, _ in h1_families:
             c = h1[(f, t)] if t in TASKS else h1_totals[f]
             want = target if t in TASKS else target * len(TASKS)
             cells += [f"{c['trials']} of {want}", f"{c['solved']} ({pct(c['rate'])})" if c["trials"] else ""]
@@ -159,8 +163,13 @@ def render(rows: list[dict], target: int = TARGET, after: str | None = None) -> 
         lines.append(f"- {n}: " + (", ".join(left) if left else "done"))
         left = [f"{t} x{target - h1[(f, t)]['trials']}" for t in TASKS if h1[(f, t)]["trials"] < target]
         lines.append(f"- {n}, one move (H1): " + (", ".join(left) if left else "done"))
-    for f, n in FAMILIES:
+    for f, n in H1_FAMILIES:
+        left = [f"{t} x{target - h1[(f, t)]['trials']}" for t in TASKS if h1[(f, t)]["trials"] < target]
+        lines.append(f"- {n}: " + (", ".join(left) if left else "done"))
+    for f, n in FAMILIES + H1_FAMILIES:
         fam = [r for r in rows if r["family"] == f]
+        if f in dict(H1_FAMILIES) and not fam:
+            continue
         lines += ["", f"## {n} trials ({f})", ""]
         if not fam:
             lines.append("none yet")

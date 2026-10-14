@@ -551,8 +551,12 @@ operator stop or a failure ends the series.
 
 One-move trials (H1): `--distance 1` on a six-task server keeps the task prompt but makes the board one move along
 the task's path the trial's goal, so the trial ends as soon as that move is made (reached or not; budget two moves, the
-arm protocol's rules). The six-task scoreboard keeps these in their own table and the chart fills its Expert data (H1)
-bars from them. `./run_plot_comparison.sh` draws the comparison bar chart
+arm protocol's rules). The six-task scoreboard keeps these in their own table as the six-task models' first move. The
+models trained on that first move (`hanoi_expert6_h1`: Cosmos served with `serve_dense --port 8001 --h1` from
+cosmos-policy, pi0.5 with `./run_dense_server.sh --config-name pi05_hanoi_expert6_h1_cycle2`) speak the play
+goal-sentence interface, so `--distance 1` sends them the goal board's sentence; their runs are filed as `cosmos_h1` and
+`pi05_h1`, appear in the same one-move table, and are what the chart's Expert data (H1) bars show.
+`./run_plot_comparison.sh` draws the comparison bar chart
 (`exp_vid/six_task_progress.png` and `.pdf`): average task progress per method over the six tasks, keeping the best 3 trials
 per task (`--best`), with the methods and conditions not yet tested as hatched grey placeholders
 ([plot_comparison.py](plot_comparison.py), values in `PLACEHOLDERS`). Each measured bar carries an error bar of one standard

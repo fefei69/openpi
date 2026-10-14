@@ -110,12 +110,15 @@ def test_one_move_trials_have_their_own_table(tmp_path):
     write_run(runs, "dense_live_1", "cosmos_multitask", "AAAA_to_CCCC", solution, status="task_solved")
     write_run(runs, "dense_live_2", "cosmos_multitask", "AAAA_to_CCCC", solution[:1], status="task_solved", goal_board="BAAA")
     write_run(runs, "dense_live_3", "cosmos_multitask", "AAAA_to_CCCC", [("A", "C")], status="budget_spent", goal_board="BAAA")
+    write_run(runs, "dense_live_4", "cosmos_h1", "AAAA_to_CCCC", solution[:1], status="task_solved", goal_board="BAAA")  # the H1 model
     rows = scoreboard.collect(runs)
-    assert [(r["distance"], r["solved"]) for r in rows] == [(15, True), (1, True), (1, False)]
+    assert [(r["family"], r["distance"], r["solved"]) for r in rows] == [
+        ("cosmos_multitask", 15, True), ("cosmos_multitask", 1, True), ("cosmos_multitask", 1, False), ("cosmos_h1", 1, True)]
     text = scoreboard.render(rows, target=3)
     assert "| AAAA_to_CCCC | 1 of 3 | 1 (100%) | 100% |" in text          # the full-tower table counts only distance 15
-    assert "| AAAA_to_CCCC | BAAA | 2 of 3 | 1 (50%) | 0 of 3 |  |" in text  # the one-move table
-    assert "- Cosmos, one move (H1): AAAA_to_CCCC x1, CCCC_to_AAAA x3" in text
+    assert "| AAAA_to_CCCC | BAAA | 2 of 3 | 1 (50%) | 0 of 3 |  | 1 of 3 | 1 (100%) | 0 of 3 |  |" in text  # the one-move table
+    assert "- Cosmos, one move (H1): AAAA_to_CCCC x1, CCCC_to_AAAA x3" in text and "- Cosmos H1 model: AAAA_to_CCCC x2" in text
+    assert "## Cosmos H1 model trials (cosmos_h1)" in text and "## pi0.5 H1 model trials" not in text
 
 
 def test_runs_are_found_under_family_folders(tmp_path):

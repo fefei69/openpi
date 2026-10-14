@@ -82,6 +82,10 @@ SELECTED_EXPORTS = {
     "cosmos_hanoi_play_k5_h16": "1544c36873db0c9f3fa40287133f3265e031ae40e8958c176c58e9e9ed4472c6",
     # pi0.5 play_k5 contract seven, cycle 2, export 31999 (export.json SHA-256): prefix 3, goal board sentence required.
     "pi05_hanoi_play_k5_cycle2": "3522c8afec2c202622eb60799b35c1cbd4e5ba59e6413e55ae2addece61f2f32",
+    # The one-move expert models (first move of the six tasks, hanoi_expert6_h1), same goal-sentence interface as play:
+    # Cosmos video init iter 8000 (weights file SHA-256), pi0.5 cycle 2 export 15999 (export.json SHA-256).
+    "cosmos_hanoi_expert6_h1_h16": "9b3a898e3f037eb816e147aa9b68ac1d9a34912f846d32f104cb63799ee1f0a6",
+    "pi05_hanoi_expert6_h1_cycle2": "63f38ed72bed3913650f78363d6982e661a84517cc9eb3733c5d5cc9979bcf2b",
 }
 SELECTED_EXPORT_SHA256 = SELECTED_EXPORTS["pi05_hanoi_dense_aaaa_to_cccc"]
 ALLOWED_HORIZONS = (30, 16)

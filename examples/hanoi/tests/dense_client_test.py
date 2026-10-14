@@ -305,3 +305,12 @@ def test_repeats_run_trials_in_a_row_and_pause_for_the_board_reset(monkeypatch):
     assert calls == [1, 1] and prompts == []
     with pytest.raises(ValueError, match="repeats"):
         dense_client.main(dense_client.Config(mode="replay", repeats=0))
+
+
+def test_one_move_models_are_their_own_families():
+    for config, model, prefix in (("cosmos_hanoi_expert6_h1_h16", "cosmos_h1", 8), ("pi05_hanoi_expert6_h1_cycle2", "pi05_h1", 3)):
+        identity = play_metadata(model=model, config_name=config, export_sha256=dense_client.SELECTED_EXPORTS[config])
+        identity["hanoi_play"]["contract"]["execution_prefix"] = prefix
+        r = dense_client.check_contract(identity, expected_export_sha256="selected", task="BBBB_to_CCCC", distance=1)
+        assert r["policy_family"] == model and r["play"] and r["task"]["goal_board"] == "ABBB"
+        assert r["task_prompt"] == "Goal: peg A holds ring 1, peg B holds rings 2, 3 and 4, peg C is empty."

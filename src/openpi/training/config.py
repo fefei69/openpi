@@ -932,6 +932,68 @@ _CONFIGS = [
         policy_output_context_keys=("goal_board",),
     ),
     TrainConfig(
+        # One-move expert set (Cosmos handover 2026-10-06): the first move of the six tower tasks, play goal-sentence
+        # interface, six-task recipe (standard pi0.5 state tokens, library-default augmentation), 16,000 updates.
+        name="pi05_hanoi_expert6_h1",
+        assets_base_dir="data/hanoi/expert6_h1_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_expert6_h1_raw",
+            assets=AssetsConfig(asset_id="local/hanoi_expert6_h1"),
+            dense_archive_path="data/hanoi/expert6_h1_pi05/indices/first_move_train.npz",
+            play=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=16_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=16_000,
+        batch_size=32,
+        save_interval=1_000,
+        keep_period=None,
+        export_params_interval=1_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_expert6_h1"),
+        policy_metadata_module="openpi.policies.hanoi_play_policy",
+        policy_output_context_keys=("goal_board",),
+    ),
+    TrainConfig(
+        # Second cycle of the one-move expert run: weights from the first cycle's final export, fresh optimizer and
+        # cosine schedule, 16,000 further updates (32,000 in total), same archive, sentences and normalization.
+        # Exports every 2,000 updates (the first cycle used 1,000): the scratch quota was at 90% at launch.
+        name="pi05_hanoi_expert6_h1_cycle2",
+        assets_base_dir="data/hanoi/expert6_h1_pi05/assets",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=16, discrete_state_input=True),
+        data=LeRobotHanoiDenseDataConfig(
+            repo_id="local/hanoi_expert6_h1_raw",
+            assets=AssetsConfig(
+                assets_dir="data/hanoi/expert6_h1_pi05/assets/pi05_hanoi_expert6_h1",
+                asset_id="local/hanoi_expert6_h1",
+            ),
+            dense_archive_path="data/hanoi/expert6_h1_pi05/indices/first_move_train.npz",
+            play=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "checkpoints/pi05_hanoi_expert6_h1/hanoi_expert6_h1_20261006/exports/15999/params"
+        ),
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000, peak_lr=2.5e-5, decay_steps=16_000, decay_lr=2.5e-6
+        ),
+        num_train_steps=16_000,
+        batch_size=32,
+        save_interval=1_000,
+        keep_period=None,
+        export_params_interval=2_000,
+        num_workers=4,
+        wandb_enabled=True,
+        wandb_log_images=False,
+        policy_metadata=hanoi_dense_policy.contract_for("pi05_hanoi_expert6_h1_cycle2"),
+        policy_metadata_module="openpi.policies.hanoi_play_policy",
+        policy_output_context_keys=("goal_board",),
+    ),
+    TrainConfig(
         name=hanoi_waypoint_policy.CONFIG_NAME,
         assets_base_dir="data/hanoi/waypoint_v4/assets",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=8, discrete_state_input=True),

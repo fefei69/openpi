@@ -72,6 +72,30 @@ VARIANTS = {
         "kind": "play",
         "archive_config": "pi05_hanoi_play_k5",
     },
+    # One-move expert set (first move of the six tasks) under the play goal-sentence interface: 16,000 updates,
+    # exports every 1,000; validation is small, so training validates on every 3rd row and evaluate on every row.
+    "pi05_hanoi_expert6_h1": {
+        "horizon": 16,
+        "data_root": "data/hanoi/expert6_h1_pi05",
+        "updates": 16_000,
+        "kind": "play",
+        "dataset": "first_move",
+        "validation_stride": 3,
+        "evaluate_stride": 1,
+        "probe_all_pairs_cap": 512,
+    },
+    # Second cycle of the one-move run (user, 2026-10-06): 16,000 further updates from export 15,999, 32,000 in total.
+    "pi05_hanoi_expert6_h1_cycle2": {
+        "horizon": 16,
+        "data_root": "data/hanoi/expert6_h1_pi05",
+        "updates": 16_000,
+        "kind": "play",
+        "dataset": "first_move",
+        "archive_config": "pi05_hanoi_expert6_h1",
+        "validation_stride": 3,
+        "evaluate_stride": 1,
+        "probe_all_pairs_cap": 512,
+    },
 }
 
 
@@ -89,6 +113,11 @@ def is_play(config_name: str) -> bool:
     return kind_for(config_name) == "play"
 
 
+def dataset_for(config_name: str) -> str:
+    """Which builder/gate owns the archive: 'first_move' for the one-move expert set, else the variant's kind."""
+    return str(VARIANTS[config_name].get("dataset", kind_for(config_name)))
+
+
 def updates_for(config_name: str) -> int:
     return int(VARIANTS[config_name]["updates"])
 
@@ -103,6 +132,10 @@ def contract_for(config_name: str) -> dict:
         from openpi.policies import hanoi_multitask_policy
 
         return hanoi_multitask_policy.CONTRACT
+    if dataset_for(config_name) == "first_move":
+        from openpi.policies import hanoi_first_move_policy
+
+        return hanoi_first_move_policy.CONTRACT
     if is_play(config_name):
         from openpi.policies import hanoi_play_policy
 

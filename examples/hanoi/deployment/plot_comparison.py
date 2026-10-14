@@ -44,10 +44,11 @@ METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
 GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
 # The policy family suffix, goal distance and trial selection behind a method in each group, from the run logs: six-task
-# models on the optimal demonstrations for the full 15-move tower (H15, the best --best trials per task) and for the
-# one-move trials (H1, goal at distance 1, the first --best runs per task in time order: the planned trials, misses
-# included, later re-runs not), play models on play for the full tower.
-GROUP_SOURCE = {"Expert data (H1)": ("_multitask", 1, "first"), "Expert data (H15)": ("_multitask", 15, "best"),
+# models on the optimal demonstrations for the full 15-move tower (H15, the best --best trials per task); the models
+# trained on the first move of the six tasks for the one-move trials (H1, goal at distance 1, the first --best runs
+# per task in time order: the planned trials, misses included, later re-runs not); play models on play for the full
+# tower.
+GROUP_SOURCE = {"Expert data (H1)": ("_h1", 1, "first"), "Expert data (H15)": ("_multitask", 15, "best"),
                 "Non-expert data": ("_play", 15, "best")}
 FAMILY_SUFFIX = {group: suffix for group, (suffix, _, _) in GROUP_SOURCE.items()}
 
@@ -98,7 +99,7 @@ def hand_rows(hand_trials=None) -> list[dict]:
 
 
 def comparison_rows(since: str | None = None) -> list[dict]:
-    """Six-task trials plus the play trials that are comparable to them (protocol A on the full tower moves), plus the hand-entered ones."""
+    """Six-task and one-move-model trials, the play trials comparable to them (protocol A, full tower), and the hand-entered ones."""
     play = [r for r in scoreboard.collect(since=since, play=True) if r["goal_protocol"] == "final" and r["distance"] == 15]
     return scoreboard.collect(since=since) + play + hand_rows()
 

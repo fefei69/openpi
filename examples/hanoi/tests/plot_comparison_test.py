@@ -6,9 +6,10 @@ def row(family, task, progress, distance=15):
 
 
 def test_one_move_trials_fill_the_h1_group_only():
-    rows = [row("cosmos_multitask", "AAAA_to_CCCC", 1.0), row("cosmos_multitask", "AAAA_to_CCCC", 1.0, distance=1),
-            row("cosmos_multitask", "AAAA_to_CCCC", 0.0, distance=1)]
-    rows += [row("cosmos_multitask", "AAAA_to_CCCC", 1.0, distance=1)] * 3   # five one-move runs: the first three count, misses included
+    rows = [row("cosmos_multitask", "AAAA_to_CCCC", 1.0), row("cosmos_h1", "AAAA_to_CCCC", 1.0, distance=1),
+            row("cosmos_h1", "AAAA_to_CCCC", 0.0, distance=1)]
+    rows += [row("cosmos_h1", "AAAA_to_CCCC", 1.0, distance=1)] * 3   # five one-move runs of the H1 model: the first three count, misses included
+    rows += [row("cosmos_multitask", "AAAA_to_CCCC", 0.0, distance=1)]  # a six-task model cut after its first move: not the H1 bar
     for k, r in enumerate(r for r in rows if r["distance"] == 1):
         r["run"] = f"dense_live_{k}"
     vals = plot_comparison.values(rows, best=3, reported={}, placeholders={"Expert data (H1)": {1: 100}})

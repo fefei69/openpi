@@ -177,7 +177,7 @@ class HanoiPlayOutputs(transforms.DataTransformFn):
 def serving_metadata(train_config, checkpoint_dir) -> dict:
     metadata = hanoi_dense_policy.serving_metadata(train_config, checkpoint_dir)
     block = metadata.pop("hanoi_dense")
-    block["contract"] = CONTRACT
+    block["contract"] = hanoi_dense_policy.contract_for(train_config.name)
     block["prompts"] = list(PROMPTS)
     block["boards"] = list(BOARDS)
     block["prompts_sha256"] = PROMPTS_SHA256
