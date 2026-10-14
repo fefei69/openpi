@@ -45,15 +45,17 @@ GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
 # The policy family suffix, goal distance and trial selection behind a method in each group, from the run logs: six-task
 # models on the optimal demonstrations for the full 15-move tower (H15, the best --best trials per task) and for the
-# one-move trials (H1, goal at distance 1, every run counted), play models on play for the full tower.
-GROUP_SOURCE = {"Expert data (H1)": ("_multitask", 1, None), "Expert data (H15)": ("_multitask", 15, "best"),
+# one-move trials (H1, goal at distance 1, the first --best runs per task in time order: the planned trials, misses
+# included, later re-runs not), play models on play for the full tower.
+GROUP_SOURCE = {"Expert data (H1)": ("_multitask", 1, "first"), "Expert data (H15)": ("_multitask", 15, "best"),
                 "Non-expert data": ("_play", 15, "best")}
 FAMILY_SUFFIX = {group: suffix for group, (suffix, _, _) in GROUP_SOURCE.items()}
 
 
-def group_best(group: str, best: int) -> int:
-    """Trials kept per task for a group: ``best`` where the group selects the best ones, otherwise all of them."""
-    return best if GROUP_SOURCE[group][2] == "best" else 10 ** 6
+def pick_trials(rows: list[dict], group: str, family: str, best: int) -> dict:
+    """The trials a group counts per task: the best ``best`` by progress, or the first ``best`` in time order."""
+    chooser = scoreboard.first_trials if GROUP_SOURCE[group][2] == "first" else scoreboard.best_trials
+    return chooser(rows, family, best)
 # Per-trial scores from another agent's logs, entered by hand: group -> method index -> [(task, progress in percent)].
 # Ours (user, 2026-10-08). Expert data (H15): the 18-trial campaign of 2026-10-07 with fixed settings, including its one
 # 93.3, and not the extra trial run after it. Non-expert data: the final play runner of 2026-10-05/06, with the three
@@ -115,10 +117,9 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
         for k, (_, _, stem, _) in enumerate(METHODS):
             family = stem + FAMILY_SUFFIX[group] if stem and group in FAMILY_SUFFIX else None
             group_rows = [r for r in rows if r.get("distance", 15) == GROUP_SOURCE[group][1]]
-            keep = group_best(group, best)
-            mean = scoreboard.average_progress(group_rows, family, keep) if family else None
+            mean = scoreboard.average_progress(group_rows, family, best, GROUP_SOURCE[group][2]) if family else None
             if mean is not None:
-                picked = scoreboard.best_trials(group_rows, family, keep)
+                picked = pick_trials(group_rows, group, family, best)
                 scores = [100 * x for v in picked.values() for x in v]
                 spread = dict(NO_SPREAD)
                 if len(scores) > 1:
@@ -243,7 +244,7 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
            "sd": "Boxes: mean \u00b1 1 standard deviation of the trials counted, line at the mean; whiskers: lowest and highest trial.",
            "se": "Error bars: \u00b1 1 standard error of the mean, over all trials counted (all tasks pooled)."}[spread]
     lines = [f"Tower of Hanoi on the real arm: bars are the mean task progress over the {cases} tower moves, best {best} trials per task "
-             f"(H1: every run); labels read mean \u00b1 {measure}. " + box]
+             f"(H1: the first {best} runs per task); labels read mean \u00b1 {measure}. " + box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
     second += " ".join((f"{name}: {trials} trials on all {cases} task cases ({' and '.join(groups)} data)." if tasks == cases and trials else
                         f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data).")
@@ -285,8 +286,7 @@ def main():
             stats = "" if v["sd"] is None else (f", standard deviation {v['sd']:.1f} (variance {v['sd'] ** 2:.0f}), standard error {v['error']:.1f}, "
                                                  f"range {v['low']:.0f} to {v['high']:.0f}, quartiles {v['q1']:.0f} / {v['median']:.0f} / {v['q3']:.0f}")
             print(f"{name} ({family}): mean {v['value']:.1f}% over {v['trials']} trials{stats}" + ("" if v["complete"] else " (incomplete)"))
-            for task, scores in scoreboard.best_trials([r for r in rows if r.get("distance", 15) == GROUP_SOURCE[group][1]], family,
-                                                       group_best(group, args.best)).items():
+            for task, scores in pick_trials([r for r in rows if r.get("distance", 15) == GROUP_SOURCE[group][1]], group, family, args.best).items():
                 print(f"  {task}: " + (", ".join(f"{100 * x:.0f}%" for x in scores) if scores else "no trials"))
         else:
             print(f"{name}: {v['value']:.0f}% ({v['kind']}" + (f", {v['tasks']} task cases" if v["kind"] == "reported" else "") + ")")

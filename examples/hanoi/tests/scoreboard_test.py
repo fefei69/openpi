@@ -128,3 +128,11 @@ def test_runs_are_found_under_family_folders(tmp_path):
     write_run(runs / "pi05_multitask", "dense_replay_3", "pi05_multitask", "AAAA_to_CCCC", solution)  # replays never count
     rows = scoreboard.collect(runs)
     assert [(r["run"], r["family"], r["solved"]) for r in rows] == [("dense_live_1", "cosmos_multitask", True), ("dense_live_2", "pi05_multitask", False)]
+
+
+def test_first_trials_keep_the_planned_runs_in_time_order():
+    rows = [{"family": "pi05_multitask", "task": "CCCC_to_AAAA", "progress": p, "peak_progress": p, "aborted": False, "run": f"dense_live_{i}"}
+            for i, p in enumerate((1.0, 0.0, 1.0, 1.0))]
+    assert scoreboard.first_trials(rows, "pi05_multitask", 3)["CCCC_to_AAAA"] == [1.0, 0.0, 1.0]
+    assert scoreboard.best_trials(rows, "pi05_multitask", 3)["CCCC_to_AAAA"] == [1.0, 1.0, 1.0]
+    assert round(scoreboard.average_progress(rows, "pi05_multitask", 3, "first"), 3) == 0.667

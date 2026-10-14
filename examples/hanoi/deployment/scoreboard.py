@@ -74,9 +74,19 @@ def best_trials(rows: list[dict], family: str, best: int = TARGET) -> dict:
     return picked
 
 
-def average_progress(rows: list[dict], family: str, best: int = TARGET) -> float | None:
-    """Mean over the tasks tried of each task's mean progress over its best trials."""
-    means = [float(np.mean(v)) for v in best_trials(rows, family, best).values() if v]
+def first_trials(rows: list[dict], family: str, first: int = TARGET) -> dict:
+    """Per task, the progress of a policy's ``first`` counted trials in time order (run ids are time stamps)."""
+    picked = {}
+    for task in TASKS:
+        trials = sorted((r for r in rows if r["family"] == family and r["task"] == task and not r["aborted"]), key=lambda r: str(r.get("run", "")))
+        picked[task] = [x for x in (trial_progress(r) for r in trials) if x is not None][:first]
+    return picked
+
+
+def average_progress(rows: list[dict], family: str, best: int = TARGET, selection: str = "best") -> float | None:
+    """Mean over the tasks tried of each task's mean progress over its best (or, with ``selection="first"``, its first) trials."""
+    picked = (first_trials if selection == "first" else best_trials)(rows, family, best)
+    means = [float(np.mean(v)) for v in picked.values() if v]
     return float(np.mean(means)) if means else None
 
 
