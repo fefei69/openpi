@@ -174,6 +174,9 @@ class Config:
     # waits for Enter while the board is reset by hand, then the next trial starts from scratch (home, start pose,
     # alignment). Each trial is its own run folder. Ctrl-C at the prompt, an operator stop or a failure ends the series.
     repeats: int = 1
+    # Between repeats, have the arm put the rings back on the start tower itself (scripted pick-and-place from the
+    # tracked board, no policy) and go straight on; when the board is unknown or illegal it asks for a manual reset.
+    auto_reset: bool = True
     # After a six-task or play-policy run, regenerate exp_vid/six_task_scoreboard.md and exp_vid/play_scoreboard.md
     # (success rate, progress, move quality per case per policy) in both checkouts from every recorded run.
     update_scoreboard: bool = True
@@ -364,6 +367,8 @@ def main(config: Config):
             logging.info("Series stopped after trial %d (%s)", trial, summary["status"])
             break
         start = summary.get("start_board") or summary.get("start_peg") or "the start peg"
+        if config.auto_reset and config.mode == "live" and auto_reset(config, summary, trial):
+            continue
         try:
             input(f"Trial {trial} of {config.repeats} done ({summary['status']}). Put all four rings back on peg "
                   f"{start[0] if isinstance(start, str) else start}, then press Enter for trial {trial + 1} (Ctrl-C to stop): ")
@@ -371,6 +376,55 @@ def main(config: Config):
             print()
             logging.info("Series stopped at the prompt after trial %d", trial)
             break
+
+
+def auto_reset(config: Config, summary: dict, trial: int) -> bool:
+    """Put the rings back on the start tower with the arm; False when the board must be reset by hand."""
+    from examples.hanoi.deployment.board_reset import execute_reset, reset_moves
+
+    board, start = summary.get("final_board"), summary.get("start_board")
+    if not board or not start or summary.get("board_uncertain") or summary.get("held_at_end"):
+        logging.info("Board unknown after trial %d (a ring may be loose); reset it by hand", trial)
+        return False
+    moves = reset_moves(board, start)
+    if moves is None:
+        logging.info("Board %s after trial %d is not a legal state; reset it by hand", board, trial)
+        return False
+    if not moves:
+        logging.info("Board already at %s after trial %d", start, trial)
+        return True
+    workspace = json.loads(config.workspace.read_text())
+    bounds = (np.asarray(workspace["xyz_min_m"], float), np.asarray(workspace["xyz_max_m"], float))
+    from examples.hanoi.deployment.board_reset import PEG_HOVER_XYZ
+
+    arm = TrossenArm(config.robot_ip, initial_xyz=PEG_HOVER_XYZ[moves[0][1]])
+    report = {"status": "failed"}
+    try:
+        logging.info("Resetting the board: %d move(s) from %s back to %s", len(moves), board, start)
+        arm.initialize()
+        arm.enable()
+        report = execute_reset(arm, bounds, board, start)
+        report["status"] = "reset"
+        arm.go_home()
+        logging.info("Board reset to %s; starting trial %d", start, trial + 1)
+        return True
+    except (RuntimeError, ValueError) as exc:  # a missed grasp or a leg that did not arrive
+        report["error"] = repr(exc)
+        logging.error("Board reset stopped: %s", exc)
+        try:
+            arm.stop_and_release()
+            arm.go_home()
+        except Exception as cleanup:  # noqa: BLE001
+            logging.error("Reset recovery failed: %r", cleanup)
+        return False
+    finally:
+        try:
+            arm.close()
+        except Exception:  # noqa: BLE001
+            pass
+        run_dir = summary.get("run_dir")
+        if run_dir:
+            (Path(run_dir) / "board_reset.json").write_text(json.dumps(report, indent=2, default=str) + "\n")
 
 
 def run_trial(config: Config) -> dict:
@@ -804,6 +858,7 @@ def run_trial(config: Config) -> dict:
         if isinstance(alignment, dict):
             summary["initial_proprio_alignment"] = alignment
         if output is not None:
+            summary["run_dir"] = str(output)
             (output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
             if config.update_scoreboard and (summary.get("policy_family") or "").endswith(("multitask", "play")):
                 try:

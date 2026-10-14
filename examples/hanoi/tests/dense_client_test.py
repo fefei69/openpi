@@ -1,4 +1,5 @@
 """Hardware-free tests for the dense contract-five executor, contract check and transport."""
+import json
 import threading
 
 import numpy as np
@@ -314,3 +315,49 @@ def test_one_move_models_are_their_own_families():
         r = dense_client.check_contract(identity, expected_export_sha256="selected", task="BBBB_to_CCCC", distance=1)
         assert r["policy_family"] == model and r["play"] and r["task"]["goal_board"] == "ABBB"
         assert r["task_prompt"] == "Goal: peg A holds ring 1, peg B holds rings 2, 3 and 4, peg C is empty."
+
+
+def test_auto_reset_plans_from_the_tracked_board_and_falls_back_to_the_operator(monkeypatch, tmp_path):
+    from examples.hanoi.deployment import board_reset
+
+    (tmp_path / "ws.json").write_text('{"xyz_min_m": [0.4, -0.1, 0.04], "xyz_max_m": [0.55, 0.12, 0.25]}')
+    config = dense_client.Config(mode="live", workspace=tmp_path / "ws.json", repeats=3)
+    calls = []
+
+    class FakeArm:
+        def __init__(self, ip, *, initial_xyz):
+            calls.append(("connect", tuple(np.round(initial_xyz, 3))))
+
+        def initialize(self):
+            calls.append("initialize")
+
+        def enable(self):
+            calls.append("enable")
+
+        def go_home(self):
+            calls.append("home")
+
+        def stop_and_release(self):
+            calls.append("release")
+
+        def close(self):
+            calls.append("close")
+
+    monkeypatch.setattr(dense_client, "TrossenArm", FakeArm)
+    monkeypatch.setattr(board_reset, "execute_reset", lambda arm, bounds, board, start, log=None: calls.append(("reset", board, start)) or {"moves": []})
+    run = tmp_path / "dense_live_1"
+    run.mkdir()
+    summary = {"status": "task_solved", "final_board": {"A": [4, 3, 2], "B": [1], "C": []}, "start_board": "AAAA", "run_dir": str(run)}
+    assert dense_client.auto_reset(config, summary, 1) is True
+    assert calls == [("connect", tuple(np.round(board_reset.PEG_HOVER_XYZ["B"], 3))), "initialize", "enable",
+                     ("reset", summary["final_board"], "AAAA"), "home", "close"]
+    assert json.loads((run / "board_reset.json").read_text())["status"] == "reset"
+    # Nothing to do when the board is already the start tower; by hand when it is unknown or illegal.
+    assert dense_client.auto_reset(config, {**summary, "final_board": {"A": [4, 3, 2, 1], "B": [], "C": []}}, 1) is True
+    assert dense_client.auto_reset(config, {**summary, "held_at_end": [1, "B"]}, 1) is False
+    assert dense_client.auto_reset(config, {**summary, "final_board": {"A": [4, 3, 1, 2], "B": [], "C": []}}, 1) is False
+    # A reset that fails stops the arm safely, records the error and hands the board to the operator.
+    calls.clear()
+    monkeypatch.setattr(board_reset, "execute_reset", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("leg missed")))
+    assert dense_client.auto_reset(config, summary, 2) is False
+    assert calls[-3:] == ["release", "home", "close"] and "leg missed" in json.loads((run / "board_reset.json").read_text())["error"]

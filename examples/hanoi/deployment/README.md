@@ -544,10 +544,14 @@ campaign target of 3 per task per policy (36 runs), solved count and success rat
 unscorable after an illegal stacking counts its peak, marked `*`), the move-quality counts and clean trials per case, what is
 still to run, and the per-trial rows. Aborted runs are listed but not counted. `./run_scoreboard.sh` rebuilds it by hand
 (`--since`, `--exclude <run>`, `--target`); `--no-update-scoreboard` on the client skips it; move a run folder out of
-`data/hanoi/deployment` to drop it for good. Repeats: `--repeats 3` runs three trials of the same configuration in a row. After each trial the arm releases and
-returns to joint home as usual, the client waits for Enter while the rings are put back on the start peg by hand, and
-the next trial starts from scratch (home, start pose, alignment) as its own run folder. Ctrl-C at the prompt, an
-operator stop or a failure ends the series.
+`data/hanoi/deployment` to drop it for good. Repeats: `--repeats 3` runs three trials of the same configuration in a row, each its own run folder. Between them
+the arm puts the rings back on the start tower itself ([board_reset.py](board_reset.py)): from the tracked final
+board it plans the shortest legal sequence of moves back to the start and performs each as scripted pick-and-place
+from the recorded peg hovers (descend to the ring's grasp level, close, lift, travel at the 191 mm hover, descend to
+the 152 mm release height, open), every leg validated like a policy command and checked on arrival, every close
+checked for a ring; the result is written to the trial's `board_reset.json`. When the board is unknown (a ring was
+released loose), illegal, or a reset leg fails, the client stops the arm safely and waits for Enter while the rings are
+put back by hand (`--no-auto-reset` always asks). Ctrl-C at the prompt, an operator stop or a failure ends the series.
 
 One-move trials (H1): `--distance 1` on a six-task server keeps the task prompt but makes the board one move along
 the task's path the trial's goal, so the trial ends as soon as that move is made (reached or not; budget two moves, the
