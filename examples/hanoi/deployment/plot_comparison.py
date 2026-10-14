@@ -127,7 +127,7 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
                     spread = {"sd": sd, "error": sd / float(np.sqrt(len(scores))), "low": float(min(scores)), "high": float(max(scores)),
                               "q1": q1, "median": median, "q3": q3}
                 out[(group, k)] = {"value": 100 * mean, "kind": "measured", "trials": len(scores), "tasks": sum(1 for v in picked.values() if v),
-                                   "complete": len(scores) == best * cases, **spread}
+                                   "complete": all(len(v) >= best for v in picked.values()), **spread}
             elif k in reported.get(group, {}):
                 value, tasks, *trials = reported[group][k]
                 out[(group, k)] = {"value": float(value), "kind": "reported", "trials": int(trials[0]) if trials else None,
