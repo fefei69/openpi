@@ -76,3 +76,10 @@ def test_hand_entered_trials_count_like_measured_ones():
 
 def test_labels_never_round_onto_the_bounds():
     assert [plot_comparison.fmt(x) for x in (100.0, 99.63, 99.4, 75.6, 0.37, 0.0, 4.8)] == ["100", "99.6", "99", "76", "0.4", "0", "5"]
+
+
+def test_a_reported_result_may_carry_its_spread():
+    vals = plot_comparison.values([], best=3, reported={"Expert data (H1)": {3: (100.0, None, None, 0.0), 2: (50.0, 6, 18)}}, placeholders={})
+    with_spread, without = vals[("Expert data (H1)", 3)], vals[("Expert data (H1)", 2)]
+    assert (with_spread["kind"], with_spread["value"], with_spread["sd"], with_spread["error"], with_spread["complete"]) == ("reported", 100.0, 0.0, 0.0, True)
+    assert (without["kind"], without["value"], without["sd"], without["trials"]) == ("reported", 50.0, None, 18)

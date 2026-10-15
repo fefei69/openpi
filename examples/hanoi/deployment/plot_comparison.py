@@ -75,8 +75,9 @@ HAND_TRIALS = {
     ]},
 }
 # Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
-# None when unknown, trials when known). Ours on expert data (H1): 100% (user, 2026-10-15; no trial counts given).
-REPORTED = {"Expert data (H1)": {3: (100.0, None)}}
+# None when unknown, trials when known, spread when known: the standard error, drawn and labelled like a measured one).
+# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given).
+REPORTED = {"Expert data (H1)": {3: (100.0, None, None, 0.0)}}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. The whole one-move
 # (H1) group and V-JEPA 2-AC are not tested.
 PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50}, "Expert data (H15)": {2: 5}, "Non-expert data": {2: 2}}
@@ -131,9 +132,15 @@ def values(rows: list[dict], best: int, reported=None, placeholders=None) -> dic
                 out[(group, k)] = {"value": 100 * mean, "kind": "measured", "trials": len(scores), "tasks": sum(1 for v in picked.values() if v),
                                    "complete": all(len(v) >= best for v in picked.values()), **spread}
             elif k in reported.get(group, {}):
-                value, tasks, *trials = reported[group][k]
-                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": int(trials[0]) if trials else None,
-                                   "tasks": None if tasks is None else int(tasks), "complete": tasks is None or int(tasks) == cases, **NO_SPREAD}
+                value, tasks, *rest = reported[group][k]
+                trials = rest[0] if rest else None
+                spread = dict(NO_SPREAD)
+                if len(rest) > 1 and rest[1] is not None:  # a reported spread: shown like a measured standard error
+                    e = float(rest[1])
+                    spread = {"sd": e, "error": e, "low": float(value) - e, "high": float(value) + e, "q1": float(value) - e,
+                              "median": float(value), "q3": float(value) + e}
+                out[(group, k)] = {"value": float(value), "kind": "reported", "trials": None if trials is None else int(trials),
+                                   "tasks": None if tasks is None else int(tasks), "complete": tasks is None or int(tasks) == cases, **spread}
             else:
                 out[(group, k)] = {"value": float(placeholders.get(group, {}).get(k, 0)), "kind": "placeholder", "trials": 0, "tasks": 0,
                                    "complete": False, **NO_SPREAD}
