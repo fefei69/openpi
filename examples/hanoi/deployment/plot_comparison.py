@@ -39,7 +39,7 @@ from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT
 # (legend name, tick label, family stem in the run logs or None, colour or None)
 METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("$\\pi_{0.5}$ (VLA)", "$\\pi_{0.5}$\n(VLA)", "pi05", "#eb6834"),
-           ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, None),
+           ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, "#4a3aa7"),
            ("Ours", "Ours", "ours", "#1baf7a"))
 GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
@@ -76,11 +76,13 @@ HAND_TRIALS = {
 }
 # Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
 # None when unknown, trials when known, spread when known: the standard error, drawn and labelled like a measured one).
-# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given).
-REPORTED = {"Expert data (H1)": {3: (100.0, None, None, 0.0)}}
-# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. The whole one-move
-# (H1) group and V-JEPA 2-AC are not tested.
-PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50}, "Expert data (H15)": {2: 5}, "Non-expert data": {2: 2}}
+# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given). V-JEPA 2-AC: 0% on every
+# trial in all three settings (user, 2026-10-15; no trial counts given).
+REPORTED = {"Expert data (H1)": {2: (0.0, None, None, 0.0), 3: (100.0, None, None, 0.0)},
+            "Expert data (H15)": {2: (0.0, None, None, 0.0)}, "Non-expert data": {2: (0.0, None, None, 0.0)}}
+# Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Only the six-task
+# models' one-move bars fall back to these until the H1 models have trials.
+PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100}}
 NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
