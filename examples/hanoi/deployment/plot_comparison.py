@@ -75,11 +75,11 @@ HAND_TRIALS = {
     ]},
 }
 # Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
-# None when unknown, trials when known). None at the moment.
-REPORTED = {}
+# None when unknown, trials when known). Ours on expert data (H1): 100% (user, 2026-10-15; no trial counts given).
+REPORTED = {"Expert data (H1)": {3: (100.0, None)}}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. The whole one-move
 # (H1) group and V-JEPA 2-AC are not tested.
-PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50, 3: 100}, "Expert data (H15)": {2: 5}, "Non-expert data": {2: 2}}
+PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100, 2: 50}, "Expert data (H15)": {2: 5}, "Non-expert data": {2: 2}}
 NO_SPREAD = {"sd": None, "error": None, "low": None, "high": None, "q1": None, "median": None, "q3": None}
 SURFACE, INK, SECONDARY, MUTED, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#8a8984", "#e6e6e3"
 PLACEHOLDER_FILL, PLACEHOLDER_HATCH = "#deded9", "#b9b8b2"
