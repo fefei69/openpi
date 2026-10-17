@@ -40,8 +40,10 @@ from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT
 # (legend name, tick label, family stem in the run logs or None, colour or None)
 METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("$\\pi_{0.5}$ (VLA)", "$\\pi_{0.5}$\n(VLA)", "pi05", "#eb6834"),
-           ("V-JEPA 2-AC*", "V-JEPA\n2-AC*", None, "#4a3aa7"),  # * with manual subgoals
+           ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, "#4a3aa7"),
+           ("V-JEPA 2-AC*", "V-JEPA\n2-AC*", None, "#e87ba4"),  # * with manual subgoals
            ("Ours", "Ours", "ours", "#1baf7a"))
+OURS = len(METHODS) - 1  # method index of Ours in the tables below
 GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
 # The policy family suffix, goal distance and trial selection behind a method in each group, from the run logs: six-task
@@ -64,12 +66,12 @@ def pick_trials(rows: list[dict], group: str, family: str, best: int) -> dict:
 # B-to-A trials taken from the 2026-10-07 re-run that added the recovery fix and the transit guard (100 each) in place
 # of the three 40s before those rules; a 60 with the recovery fix only is left out. Eighteen trials each.
 HAND_TRIALS = {
-    "Expert data (H15)": {3: [
+    "Expert data (H15)": {4: [
         ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
         ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
         ("AAAA_to_CCCC", 93.3), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100),
     ]},
-    "Non-expert data": {3: [
+    "Non-expert data": {4: [
         ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100),
         ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100), ("CCCC_to_AAAA", 100), ("AAAA_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100),
         ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100), ("CCCC_to_BBBB", 100), ("BBBB_to_AAAA", 100), ("AAAA_to_BBBB", 100), ("BBBB_to_CCCC", 100),
@@ -77,14 +79,16 @@ HAND_TRIALS = {
 }
 # Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
 # None when unknown, trials when known, spread when known: the standard error, drawn and labelled like a measured one).
-# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given).
-# V-JEPA 2-AC* (with manual subgoals; user, 2026-10-16), reported as mean +/- standard deviation over 18 trials each and
-# entered as the standard error (std / sqrt(18)): H15 expert-data model 21.9 +/- 18.3; non-expert (play-data model,
-# expert goals) 27.0 +/- 20.6; H1 (move 1 of the expert-data model's H15 runs) 94.4 +/- 23.6, 17 of 18.
+# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given). V-JEPA 2-AC: 0% on every
+# trial in all three settings (user, 2026-10-15; no trial counts given). V-JEPA 2-AC* (with manual subgoals; user,
+# 2026-10-16), reported as mean +/- standard deviation over 18 trials each and entered as the standard error
+# (std / sqrt(18)): H15 expert-data model 21.9 +/- 18.3; non-expert (play-data model, expert goals) 27.0 +/- 20.6;
+# H1 (move 1 of the expert-data model's H15 runs) 94.4 +/- 23.6, 17 of 18.
 VJEPA_TRIALS = 18
-REPORTED = {"Expert data (H1)": {2: (94.4, None, VJEPA_TRIALS, 23.6 / math.sqrt(VJEPA_TRIALS)), 3: (100.0, None, None, 0.0)},
-            "Expert data (H15)": {2: (21.9, None, VJEPA_TRIALS, 18.3 / math.sqrt(VJEPA_TRIALS))},
-            "Non-expert data": {2: (27.0, None, VJEPA_TRIALS, 20.6 / math.sqrt(VJEPA_TRIALS))}}
+REPORTED = {"Expert data (H1)": {2: (0.0, None, None, 0.0), 3: (94.4, None, VJEPA_TRIALS, 23.6 / math.sqrt(VJEPA_TRIALS)),
+                                 4: (100.0, None, None, 0.0)},
+            "Expert data (H15)": {2: (0.0, None, None, 0.0), 3: (21.9, None, VJEPA_TRIALS, 18.3 / math.sqrt(VJEPA_TRIALS))},
+            "Non-expert data": {2: (0.0, None, None, 0.0), 3: (27.0, None, VJEPA_TRIALS, 20.6 / math.sqrt(VJEPA_TRIALS))}}
 # A note per method for the caption text.
 METHOD_NOTES = {"V-JEPA 2-AC*": "with manual subgoals; its results were reported as mean \u00b1 standard deviation over 18 trials "
                                 "per setting and are drawn as the standard error"}
@@ -187,7 +191,7 @@ def fmt(x: float) -> str:
 
 def draw(vals: dict, note: str | None, spread: str = "se"):
     """The figure; ``note`` is the footnote under the chart, or None for a bare figure whose caption lives in the paper."""
-    fig = plt.figure(figsize=(14.6, 4.91 if note else 4.3), dpi=200, facecolor=SURFACE)
+    fig = plt.figure(figsize=(2.9 * len(METHODS) + 2.9, 4.91 if note else 4.3), dpi=200, facecolor=SURFACE)
     ax = fig.add_axes([0.10, 0.325, 0.80, 0.475] if note else [0.10, 0.21, 0.80, 0.60], facecolor=SURFACE)
     slot, width = 1.0, 0.86
     centers = {}
