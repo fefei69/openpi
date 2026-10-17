@@ -24,6 +24,7 @@ A measured or reported bar that does not yet cover all six task cases with ``--b
 """
 
 import argparse
+import math
 from pathlib import Path
 
 import matplotlib
@@ -39,7 +40,7 @@ from examples.hanoi.deployment.trial_report import COSMOS_ROOT, OPENPI_ROOT
 # (legend name, tick label, family stem in the run logs or None, colour or None)
 METHODS = (("Cosmos Policy", "Cosmos\nPolicy", "cosmos", "#2a78d6"),
            ("$\\pi_{0.5}$ (VLA)", "$\\pi_{0.5}$\n(VLA)", "pi05", "#eb6834"),
-           ("V-JEPA 2-AC", "V-JEPA\n2-AC", None, "#4a3aa7"),
+           ("V-JEPA 2-AC*", "V-JEPA\n2-AC*", None, "#4a3aa7"),  # * with manual subgoals
            ("Ours", "Ours", "ours", "#1baf7a"))
 GROUPS = ("Expert data (H1)", "Expert data (H15)", "Non-expert data")
 SHORT_GROUP = {"Expert data (H1)": "expert H1", "Expert data (H15)": "expert H15", "Non-expert data": "non-expert"}
@@ -76,10 +77,17 @@ HAND_TRIALS = {
 }
 # Results known only as an average: group -> method index -> (mean progress in percent, task cases tested out of six or
 # None when unknown, trials when known, spread when known: the standard error, drawn and labelled like a measured one).
-# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given). V-JEPA 2-AC: 0% on every
-# trial in all three settings (user, 2026-10-15; no trial counts given).
-REPORTED = {"Expert data (H1)": {2: (0.0, None, None, 0.0), 3: (100.0, None, None, 0.0)},
-            "Expert data (H15)": {2: (0.0, None, None, 0.0)}, "Non-expert data": {2: (0.0, None, None, 0.0)}}
+# Ours on expert data (H1): 100% with a spread of 0 (user, 2026-10-15; no trial counts given).
+# V-JEPA 2-AC* (with manual subgoals; user, 2026-10-16), reported as mean +/- standard deviation over 18 trials each and
+# entered as the standard error (std / sqrt(18)): H15 expert-data model 21.9 +/- 18.3; non-expert (play-data model,
+# expert goals) 27.0 +/- 20.6; H1 (move 1 of the expert-data model's H15 runs) 94.4 +/- 23.6, 17 of 18.
+VJEPA_TRIALS = 18
+REPORTED = {"Expert data (H1)": {2: (94.4, None, VJEPA_TRIALS, 23.6 / math.sqrt(VJEPA_TRIALS)), 3: (100.0, None, None, 0.0)},
+            "Expert data (H15)": {2: (21.9, None, VJEPA_TRIALS, 18.3 / math.sqrt(VJEPA_TRIALS))},
+            "Non-expert data": {2: (27.0, None, VJEPA_TRIALS, 20.6 / math.sqrt(VJEPA_TRIALS))}}
+# A note per method for the caption text.
+METHOD_NOTES = {"V-JEPA 2-AC*": "with manual subgoals; its results were reported as mean \u00b1 standard deviation over 18 trials "
+                                "per setting and are drawn as the standard error"}
 # Values for bars with nothing behind them yet, by group then method index. Drawn hatched grey. Only the six-task
 # models' one-move bars fall back to these until the H1 models have trials.
 PLACEHOLDERS = {"Expert data (H1)": {0: 100, 1: 100}}
@@ -245,7 +253,7 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
     measured = [f"{label(key)} {v['trials']}" for key, v in vals.items() if v["kind"] == "measured"]
     reported, uncounted = {}, {}
     for key, v in vals.items():
-        if v["kind"] == "reported" and v["tasks"] is None:
+        if v["kind"] == "reported" and v["tasks"] is None and v["trials"] is None:
             uncounted.setdefault(SHORT_GROUP[key[0]], []).append(METHODS[key[1]][0])
         elif v["kind"] == "reported":
             reported.setdefault((METHODS[key[1]][0], v["tasks"], v["trials"]), []).append(SHORT_GROUP[key[0]])
@@ -257,8 +265,13 @@ def footnote(vals: dict, best: int, spread: str = "se") -> str:
              f"(H1: the first {best} runs per task); labels read mean \u00b1 {measure}. " + box]
     second = ("Trials: " + ", ".join(measured) + ". ") if measured else ""
     second += " ".join((f"{name}: {trials} trials on all {cases} task cases ({' and '.join(groups)} data)." if tasks == cases and trials else
+                        f"{name}: {trials} trials ({', '.join(groups)} data)." if tasks is None else
                         f"{name}: {tasks} of {cases} task cases so far ({' and '.join(groups)} data).")
                        for (name, tasks, trials), groups in reported.items())
+    shown_methods = {METHODS[key[1]][0] for key, v in vals.items() if v["kind"] != "placeholder"}
+    for name, note in METHOD_NOTES.items():
+        if name in shown_methods:
+            second += f" {name}: {note}."
     hand = [f"{SHORT_GROUP[group]} {METHODS[k][1].replace(chr(10), ' ')}" for group, methods in HAND_TRIALS.items() for k in methods]
     if hand:
         second += " Entered from another agent's logs: " + ", ".join(hand) + "."
